@@ -50,6 +50,7 @@ class Motor(object):
         self._position = np.zeros((2))  # [x, y]
         self._last_position = self._position    # 保存上一次移动的位置
         self._velocity = np.zeros((2))  # [v_x, v_y]
+        self._origin_v = np.zeros((2))  # 保存初始速度用于计算奖励
         self._destination = np.zeros((2))    # [x, y], 目的地就最好与特定方向解耦，尽量用相对方向
         # self.__acceleration = np.zeros((2))   # [φ, a], 相对当前速度矢量的转角，以及加速度的模
         # self.__policy_network = None  // 决定车辆运动的网络模型
@@ -96,6 +97,7 @@ class Motor(object):
             self._position = origin_south
             self._velocity = origin_v_south
 
+        self._origin_v = copy.deepcopy(self._velocity)
         log_str = 'agent initialtion: origin - {og}  position - {pos}  velocity - {v}m/frame'.format(v = self._velocity, og = self._origin, pos = self._position)
         # print(log_str)
         pdata.write_to_log(log_str)
@@ -214,6 +216,10 @@ class Motor(object):
     # def get_accelation(self):
     #     return self._acceleration
 
+    def get_origin_v(self):
+        v = copy.deepcopy(self._origin_v)
+        return v
+
     def check_2darray(self, arr):
         if not isinstance(arr, np.ndarray):
             print('Function needs an numpy ndarray argument')
@@ -274,6 +280,8 @@ class Motor(object):
             v_delta = np.array([ac_cos*v_cos - ac_sin*v_sin , ac_sin*v_cos + ac_cos*v_sin]) * ac[1]
             v_next = v_delta + self._velocity
 
+        ratio = pdata.MAX_VELOCITY / la.norm(v_next)    # 物理模型能达到的最大速度
+        v_next = ratio * v_next
         return v_next
 
 

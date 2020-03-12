@@ -22,9 +22,7 @@ def judge_aabb(seg1, seg2):
 if __name__ == '__main__':
     a = np.array([1,2])
     b = np.array([2,3])
-    c = np.cross(a, b)
-    d = np.cross(b, a)
-    print(c,type(c))
-    print(d,type(d))
-    e = d*c #矩阵点积
-    print(e, type(e))
+    c = a.dot(b)
+    print(type(c), c)
+    c = la.norm(a)
+    print(type(c), c)

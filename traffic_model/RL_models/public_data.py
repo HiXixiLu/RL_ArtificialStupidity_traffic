@@ -4,6 +4,7 @@ import time
 ''' 该模块是一个纯粹的数据块，这算不算单例模式？ '''
 FPS = 24                                    # 刷新的帧率，即每刷新一次速度的改变
 VELOCITY_LIMIT = 16.667 / FPS                    # 由 60km/h 换算成 m/frame
+MAX_VELOCITY = 33.333 / FPS                      # 由 120km/h 的汽车最高时速换算成 m/frame
 MAX_ACCELERATION = 27.778/FPS
 LANE_L, LANE_W,  = 18.0, 3.0                # 道路数据都改成浮点数，避免隐式类型转换的坑。单位: m ，m，m/s
 MOTER_L, MOTOR_W = 3.8, 1.8                 # 机动车尺寸单位: m，m
@@ -22,7 +23,7 @@ TARGET_UPDATE_INTERVAL = 1
 TEST_ITERATION = 10
 LEARNING_RATE = 1e-3     # 0.001的学习率
 GAMMA = 0.99    # discounted factor
-CAPACITY = 2000    # replay buffer size
+CAPACITY = 8000    # replay buffer size
 BATCH_SIZE = 64  # minimun batch size
 SEED = False
 RANDOM_SEED = 9527
@@ -32,7 +33,7 @@ RENDER = False
 LOG_INTERVAL = 50
 LOAD = True    # load model
 RENDER_INTERVAL = 100
-EXPLORATION_NOISE = 1.0  # 随机探索过程的噪声率/正态分布的标准差σ
+EXPLORATION_NOISE = 2.225  # 正态分布的标准差σ : 满足 X~N(0, σ^2) 使上α分位点在最大加速度MAX_ACCELERATION，其中α=0.005
 MAX_EPISODE = 20000    # num of games —— 进行实验的次数，也即Montecarlo序列的采集数
 MAX_LENGTH_OF_TRAJECTORY = 1000     # num of frames —— 单次训练最大序列长度
 PRINT_LOG = 5
@@ -60,6 +61,9 @@ def record_hard_params():
         mv = VELOCITY_LIMIT, fps = FPS
     ))
     write_to_log('===========================================================')
+
+
+record_hard_params()
 
 # def record_agent_params(len, wid, og, des):
 #     write_to_log('====================  agent parameters  ===================')

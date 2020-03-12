@@ -319,7 +319,6 @@ class IntersectionEnvironment():
             return False
 
 
-
     # 测试 AABB盒 是否直接分离，如果相交返回True，否则返回False
     def judge_aabb(self, seg1, seg2):
         return (min(seg1[0][0], seg1[1][0]) <= max(seg2[0][0], seg2[1][0]) and 
@@ -402,32 +401,39 @@ class IntersectionEnvironment():
             reward = -5000
             pdata.write_to_log('<agent collided>')
             return reward
-        elif not self._check_bound(agent):  # 包括越出仿真区域、开到左车道都会直接终止
-            reward = -5000
-            pdata.write_to_log('<agent out of bound>')
-            return reward
+        # elif not self._check_bound(agent):  # 包括越出仿真区域、开到左车道都会直接终止
+        #     reward = -5000
+        #     pdata.write_to_log('<agent out of bound>')
+        #     return reward
         elif self._check_arrival(agent):
             reward = 5000
             pdata.write_to_log('<agent arrived>')
             return reward
+        elif self._check_outside_region(agent):
+            reward = -5000
+            print('<agent out>')
+            pdata.write_to_log('<agent out>')
+            return reward
 
-        # 每帧持续的奖励
+        # 接近奖励
         delta_d = la.norm(agent.get_last_position() - agent.get_destination()) - la.norm(agent.get_position() - agent.get_destination())
         _r_d = 100 * delta_d
 
-        # 如何判断是否走到了别的道上 (2020-2-6: 太难判断了)
-        # if 走到了别的道上:
-        #     _r_change = -300
-        # else:
-        #     _r_change = 0
-
-        # 超速
-        velocity = la.norm(agent.get_velocity())
-        if velocity >= pdata.VELOCITY_LIMIT:
-            _r_v = -300         #TODO: 这里是否改成直接终止？
+        # 保持车道奖励
+        if not self._check_bound(agent):
+            _r_lane_change = -300
         else:
-            _r_v = 0
-                  
+            _r_lane_change = 300
+
+        # 速度奖励
+        velocity = agent.get_velocity()
+        if la.norm(velocity) >= pdata.VELOCITY_LIMIT:
+            _r_v = -300  
+        else:
+            # cos奖励 —— 与初始速度越接近，奖励越大
+            origin_v = agent.get_origin_v()
+            cosine = origin_v.dot(velocity) / (la.norm(origin_v) * la.norm(velocity)) 
+            _r_v = 100 * cosine + 10 * la.norm(velocity)                 
 
         # if isinstance(agent, MotorVehicle):     # 包导入路径的写法都会影响 isinstance()的准确性
         #     print('Hello agent MotorVehicle.')
@@ -441,7 +447,8 @@ class IntersectionEnvironment():
         # else:
         #     print("Parameter agent has to be one of class MotorVehicle, NonMotorVehicle and Pedestrian.")
 
-        reward = _r_d + _r_v    
+        # reward = _r_d + _r_v 
+        reward = _r_d + _r_v + _r_lane_change
         # print('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity), file = pdata.EXPERIMENT_LOG)
         pdata.write_to_log('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
         return reward
@@ -555,6 +562,24 @@ class IntersectionEnvironment():
             arrival = self._check_obb_collision(agent_box, self.des_box['east'])
 
         return arrival
+
+
+    # return True when agent's position is out of region
+    def _check_outside_region(self, agent):
+        pos = agent.get_position()
+        if pos[0] <= -pdata.LANE_W and pos[1] <= -pdata.LANE_W:
+            return True
+        elif pos[0] >= pdata.LANE_W and pos[1] <= -pdata.LANE_W:
+            return True
+        elif pos[0] >= pdata.LANE_W and pos[1] >= pdata.LANE_W:
+            return True
+        elif pos[0] <= -pdata.LANE_W and pos[1] >= pdata.LANE_W:
+            return True
+        elif pos[0] > (pdata.LANE_W + pdata.LANE_L) or pos[0] < (-pdata.LANE_L - pdata.LANE_W):
+            return True
+        elif pos[1] > (pdata.LANE_W + pdata.LANE_L) or pos[1] < (-pdata.LANE_L - pdata.LANE_W):
+            return True
+        return False
 
     
     # 返回单个步长内需要渲染的所有对象的顶点信息
