@@ -174,7 +174,7 @@ class CriticHER(nn.Module):
 # 一个 DDPG 实例对应一个 agent
 # TODO：完成与自己项目相关的修改
 class DDPG(object):
-    device = 'cpu'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     veer = 'straight'
     origin = 'west'
     # state_dim : 状态维度
@@ -288,7 +288,7 @@ class DDPG(object):
 
 
 class DDPG_HER(DDPG):
-    device = 'cpu'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
     veer = 'straight'
     origin = 'west'
     # state_dim : 状态维度
