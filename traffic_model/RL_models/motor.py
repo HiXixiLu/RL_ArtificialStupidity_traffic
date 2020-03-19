@@ -39,19 +39,19 @@ south_transform_mat = np.array([
     [0.0, 1.0, -pdata.LANE_L-pdata.LANE_W],
     [0.0, 0.0, 1.0]])
 
-class Motor(object):
+class vehicle(object):
     # _property属性：类属性，可由该类的不同实例共享和改写，单下划线表明仅有类的实例及其子类实例可以访问
     _vector_shape = (2,)
     _epsilon = 0.000001
     _rotate90_mat = np.array([[0, -1],[1, 0]])
 
-    def __init__(self):
+    def __init__(self, logger):
         # 类对象的实例变量
         self._position = np.zeros((2))  # [x, y]
         self._last_position = self._position    # 保存上一次移动的位置
         self._velocity = np.zeros((2))  # [v_x, v_y]
         self._origin_v = np.zeros((2))  # 保存初始速度用于计算奖励
-        self._destination = np.zeros((2))    # [x, y], 目的地就最好与特定方向解耦，尽量用相对方向
+        self._destination = np.zeros((2))    # [x, y], 2020-3-18: 最终保存的目的地是世界坐标
         # self.__acceleration = np.zeros((2))   # [φ, a], 相对当前速度矢量的转角，以及加速度的模
         # self.__policy_network = None  // 决定车辆运动的网络模型
         self._vertice_local = np.zeros((4,2))   # 记录四个顶点的局部坐标系，一旦初始化就不变更
@@ -60,6 +60,9 @@ class Motor(object):
         self._veer = '' 
         self._des_string = ''   # 用于记录最终目的地的字符串
         self.model = None       # 用于保存 DDPG 相关的类对象
+        self._width = 0.0
+        self._length = 0.0
+        self.logger = logger
 
 
     def __del__(self):
@@ -69,15 +72,13 @@ class Motor(object):
         del self._destination
         del self._epsilon
         del self._des_string
-        tmp_str = self.__class__.__name__ +  ' is deleted'
-        print(tmp_str, file = pdata.EXPERIMENT_LOG)
 
     
     # 设定初始出发点和速度
     def set_origin(self, origin):
         if not isinstance(origin, str):
             # print("set_origin function argument require an instance of class 'str' !")
-            pdata.write_to_log("set_origin function argument require an instance of class 'str' !")
+            self.logger.write_to_log("set_origin function argument require an instance of class 'str' !")
             return
 
         if origin == 'east':
@@ -100,7 +101,7 @@ class Motor(object):
         self._origin_v = copy.deepcopy(self._velocity)
         log_str = 'agent initialtion: origin - {og}  position - {pos}  velocity - {v}m/frame'.format(v = self._velocity, og = self._origin, pos = self._position)
         # print(log_str)
-        pdata.write_to_log(log_str)
+        self.logger.write_to_log(log_str)
 
 
     # 设置 agent 的转向 —— 这是为了让 agent 的运动与具体地形解耦
@@ -160,22 +161,23 @@ class Motor(object):
 
         self._destination = destination[0:2]    # 丢弃坐标运算添加的最后一个元素
         # print('destination position: {des}'.format(des = self._destination))
-        pdata.write_to_log('destination position: {des}'.format(des = self._destination))
+        self.logger.write_to_log('destination position: {des}'.format(des = self._destination))
 
 
     # 对外部开放的 agent 初始化函数
     # TODO: 这里要模板化
-    def initiate_agent(self, origin, veer):
+    def initiate_agent(self, origin, veer, isHER=False):
         '''
         param origin: 一个表示出发方向的字符串，为 'west' 'north' 'east' 'south' 四选一
         param veer: 一个表示 agent 转向的字符串，为 'left' 'straight' 'right' 三选一
         '''
         self.set_origin(origin)
         self.set_veer(veer)
-        self._vertice_in_world = self.calculate_vertice(self._position, self._velocity)
-        # TODO: 这里的纯测试代码迟早要改的
-        if origin == 'west' and veer =='straight': 
-            self.model = rl.DDPG_Straight(pdata.STATE_DIMENSION, pdata.ACTION_DIMENSION, pdata.MAX_MOTOR_ACTION) 
+        self._vertice_in_world = self.calculate_vertice(self._position, self._velocity)   
+        if isHER:
+            self.model = rl.DDPG_HER(pdata.STATE_HER_DIMENSION, pdata.ACTION_DIMENSION, pdata.MAX_MOTOR_ACTION, origin, veer, self.logger) 
+        else:
+            self.model = rl.DDPG(pdata.STATE_DIMENSION, pdata.ACTION_DIMENSION, pdata.MAX_MOTOR_ACTION, origin, veer, self.logger)   
 
 
     # 重置位置、速度、方向、顶点等原本就有的参数
@@ -219,6 +221,16 @@ class Motor(object):
     def get_origin_v(self):
         v = copy.deepcopy(self._origin_v)
         return v
+
+
+    def get_size_width(self):
+        wid = copy.deepcopy(self._width)
+        return wid
+
+    def get_size_length(self):
+        leng = copy.deepcopy(self._length)
+        return leng
+
 
     def check_2darray(self, arr):
         if not isinstance(arr, np.ndarray):
@@ -299,8 +311,8 @@ class Motor(object):
         self._last_position = copy.deepcopy(self._position)
         self._position = pos_next
         tmp_str = 'Agent Position: {pos}'.format(pos = self._position)
-        print(tmp_str)
-        pdata.write_to_log(tmp_str)
+        # print(tmp_str)
+        self.logger.write_to_log(tmp_str)
         self._vertice_in_world = self.calculate_vertice(pos_next, v_next)
 
     
@@ -325,13 +337,13 @@ class Motor(object):
 
     # 载入和保存模型参数的方式
     def load(self):
-        pdata.write_to_log('.pth to be loaded...')
-        self.model.load()
+        self.logger.write_to_log('.pth to be loaded...')
+        self.model.load('')
 
 
     def save(self):
-        pdata.write_to_log('.pth to be saved...')
-        self.model.save()
+        self.logger.write_to_log('.pth to be saved...')
+        self.model.save('')
 
 
     # return numpy array
@@ -349,20 +361,40 @@ class Motor(object):
         return self.model.replay_buffer.storage
 
 
-class MotorVehicle(Motor):
-    def __init__(self):
-        super().__init__()
+class motorVehicle(vehicle):
+    def __init__(self, logger):
+        super().__init__(logger)
         self._vertice_local = np.array([[pdata.MOTER_L/2, -pdata.MOTOR_W/2],
         [pdata.MOTER_L/2, pdata.MOTOR_W/2],
         [-pdata.MOTER_L/2, pdata.MOTOR_W/2],
         [-pdata.MOTER_L/2, -pdata.MOTOR_W/2]])
+        self._width = pdata.MOTOR_W
+        self._length = pdata.MOTER_L
+
+    def save(self):
+        self.logger.write_to_log('Motor : .pth to be saved...')
+        self.model.save('motor')
+
+    def load(self):
+        self.logger.write_to_log('Nonmotr: .pth to be loaded...')
+        self.model.load('motor')
 
 
-class NonMotorVehicle(Motor):
-    def __init__(self):
-        super().__init__()
+class nonMotorVehicle(vehicle):
+    def __init__(self, logger):
+        super().__init__(logger)
         self._vertice_local = np.array([[pdata.NON_MOTOR_L/2, -pdata.NON_MOTOR_W/2],
         [pdata.NON_MOTOR_L/2, pdata.NON_MOTOR_W/2],
-        [-pdata.NON_MOTOR_LTER_L/2, pdata.NON_MOTOR_W/2],
+        [-pdata.NON_MOTOR_L/2, pdata.NON_MOTOR_W/2],
         [-pdata.NON_MOTOR_L/2, -pdata.NON_MOTOR_W/2]])
+        self._width = pdata.NON_MOTOR_W
+        self._length = pdata.NON_MOTOR_L
+
+    def save(self):
+        self.logger.write_to_log('Motor : .pth to be saved...')
+        self.model.save('nonmotor')
+
+    def load(self):
+        self.logger.write_to_log('Nonmotr: .pth to be loaded...')
+        self.model.load('nonmotor')
         

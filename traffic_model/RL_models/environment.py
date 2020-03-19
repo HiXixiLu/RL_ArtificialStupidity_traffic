@@ -2,7 +2,7 @@ import copy
 import numpy as np 
 from numpy import linalg as la
 import public_data as pdata
-from RL_models.motor import MotorVehicle
+from RL_models.motor import motorVehicle
 
 
 class IntersectionEnvironment():
@@ -14,16 +14,19 @@ class IntersectionEnvironment():
 
     # 写死的12个合法行驶区域，对应12个 出发-目的 对
     polygons = {}
+
     # 写死的 4 个目的地区域
-    des_box = {}
+    # des_box = {}
+    
     # 写死的 8 条边界
     edges = []
 
-    def __init__(self):       
+    def __init__(self, logger):       
         # 保存三种 agent 的集合 —— self.property 是一种实例属性
         self.motor_set = []
         self.nonmotor_set = []
         self.pedestrian_set = []
+        self.logger = logger
         # 12个车辆合法行驶区域
         if len(self.polygons) == 0:
             # east to north
@@ -133,37 +136,37 @@ class IntersectionEnvironment():
                 [0, -pdata.LANE_L - 2*pdata.LANE_W]
             ])
 
-        # 初始化车辆目的地判定区域
-        if len(self.des_box) == 0:
-            # north destination
-            self.des_box['north'] = np.array([  # 防止越界开车，因此矩形被限制在合法道路区域内
-                # 坐标点顺序：右下-右上-左上-左下
-                [pdata.LANE_W, pdata.LANE_L + pdata.LANE_W],
-                [pdata.LANE_W, 2 * pdata.LANE_L + pdata.LANE_W],
-                [0, 2 * pdata.LANE_L + pdata.LANE_W],
-                [0, pdata.LANE_L + pdata.LANE_W]
-            ])
-            # west destination
-            self.des_box['west'] = np.array([
-                [-pdata.LANE_L - pdata.LANE_W, 0],
-                [-pdata.LANE_L - pdata.LANE_W, pdata.LANE_W],
-                [- 2* pdata.LANE_L - pdata.LANE_W, pdata.LANE_W],
-                [- 2* pdata.LANE_L - pdata.LANE_W, 0]
-            ])
-            # south
-            self.des_box['south'] = np.array([
-                [0, - 2* pdata.LANE_L - pdata.LANE_W],
-                [0, -pdata.LANE_L - pdata.LANE_W],
-                [-pdata.LANE_W, -pdata.LANE_L - pdata.LANE_W],
-                [-pdata.LANE_W, - 2* pdata.LANE_L - pdata.LANE_W]
-            ])
-            # east
-            self.des_box['east'] = np.array([
-                [2*pdata.LANE_L + pdata.LANE_W, -pdata.LANE_W],
-                [2*pdata.LANE_L + pdata.LANE_W, 0],
-                [pdata.LANE_L + pdata.LANE_W, 0],
-                [pdata.LANE_L + pdata.LANE_W, -pdata.LANE_W]
-            ])
+        # 初始化车辆目的地判定区域（Xixi 你是不是写碰撞写到失心疯）
+        # if len(self.des_box) == 0:
+        #     # north destination
+        #     self.des_box['north'] = np.array([  # 防止越界开车，因此矩形被限制在合法道路区域内
+        #         # 坐标点顺序：右下-右上-左上-左下
+        #         [pdata.LANE_W, pdata.LANE_L + pdata.LANE_W],
+        #         [pdata.LANE_W, 2 * pdata.LANE_L + pdata.LANE_W],
+        #         [0, 2 * pdata.LANE_L + pdata.LANE_W],
+        #         [0, pdata.LANE_L + pdata.LANE_W]
+        #     ])
+        #     # west destination
+        #     self.des_box['west'] = np.array([
+        #         [-pdata.LANE_L - pdata.LANE_W, 0],
+        #         [-pdata.LANE_L - pdata.LANE_W, pdata.LANE_W],
+        #         [- 2* pdata.LANE_L - pdata.LANE_W, pdata.LANE_W],
+        #         [- 2* pdata.LANE_L - pdata.LANE_W, 0]
+        #     ])
+        #     # south
+        #     self.des_box['south'] = np.array([
+        #         [0, - 2* pdata.LANE_L - pdata.LANE_W],
+        #         [0, -pdata.LANE_L - pdata.LANE_W],
+        #         [-pdata.LANE_W, -pdata.LANE_L - pdata.LANE_W],
+        #         [-pdata.LANE_W, - 2* pdata.LANE_L - pdata.LANE_W]
+        #     ])
+        #     # east
+        #     self.des_box['east'] = np.array([
+        #         [2*pdata.LANE_L + pdata.LANE_W, -pdata.LANE_W],
+        #         [2*pdata.LANE_L + pdata.LANE_W, 0],
+        #         [pdata.LANE_L + pdata.LANE_W, 0],
+        #         [pdata.LANE_L + pdata.LANE_W, -pdata.LANE_W]
+        #     ])
 
         if len(self.edges) == 0:
             seg = np.array([[-pdata.LANE_L - pdata.LANE_W, -pdata.LANE_W],[-pdata.LANE_W, -pdata.LANE_W]])
@@ -393,42 +396,43 @@ class IntersectionEnvironment():
         return flag
 
 
-    def _get_reward(self, agent):
+    # shaped reward: 需要专家知识
+    def _get_reward(self, agent, goal=None):
         reward = 0
 
         # 主线奖励：进入目的地、进入与目的地不符的区域、发生车辆行人碰撞，都会采用主线奖励
         if self._check_agent_collision(agent):
             reward = -5000
-            pdata.write_to_log('<agent collided>')
+            self.logger.write_to_log('<agent collided>')
             return reward
         # elif not self._check_bound(agent):  # 包括越出仿真区域、开到左车道都会直接终止
         #     reward = -5000
-        #     pdata.write_to_log('<agent out of bound>')
+        #     self.logger.write_to_log('<agent out of bound>')
         #     return reward
         elif self._check_arrival(agent):
             reward = 5000
-            pdata.write_to_log('<agent arrived>')
+            self.logger.write_to_log('<agent arrived>')
             return reward
         elif self._check_outside_region(agent):
             reward = -5000
-            print('<agent out>')
-            pdata.write_to_log('<agent out>')
+            self.logger.write_to_log('<agent out>')
             return reward
 
-        # 接近奖励
+        # 接近奖励 —— 允许的最大速度的模也仅仅只有 0.69 m/frame
         delta_d = la.norm(agent.get_last_position() - agent.get_destination()) - la.norm(agent.get_position() - agent.get_destination())
-        _r_d = 100 * delta_d
+        _r_d = 300 * delta_d
 
         # 保持车道奖励
-        if not self._check_bound(agent):
-            _r_lane_change = -300
-        else:
+        if self._check_bound(agent):
             _r_lane_change = 300
+        else:
+            _r_lane_change = -300
 
         # 速度奖励
         velocity = agent.get_velocity()
         if la.norm(velocity) >= pdata.VELOCITY_LIMIT:
-            _r_v = -300  
+            # _r_v = -300  
+            _r_v = -600
         else:
             # cos奖励 —— 与初始速度越接近，奖励越大
             origin_v = agent.get_origin_v()
@@ -447,10 +451,38 @@ class IntersectionEnvironment():
         # else:
         #     print("Parameter agent has to be one of class MotorVehicle, NonMotorVehicle and Pedestrian.")
 
-        # reward = _r_d + _r_v 
         reward = _r_d + _r_v + _r_lane_change
         # print('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity), file = pdata.EXPERIMENT_LOG)
-        pdata.write_to_log('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
+        self.logger.write_to_log('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
+        return reward 
+
+    # 除了移动目标不一致，其余与
+    def get_her_reward(self, agent, normal_reward, future_pos):
+        if abs(normal_reward) == 5000:
+            reward = normal_reward
+        else:
+            # 接近奖励 —— 允许的最大速度的模也仅仅只有 0.69 m/frame
+            delta_d = la.norm(agent.get_last_position() - future_pos)
+            _r_d = 300 * delta_d
+
+            # 保持车道奖励
+            if self._check_bound(agent):
+                _r_lane_change = 300
+            else:
+                _r_lane_change = -300
+
+            # 速度奖励
+            velocity = agent.get_velocity()
+            if la.norm(velocity) >= pdata.VELOCITY_LIMIT:
+                # _r_v = -300  
+                _r_v = -600
+            else:
+                # cos奖励 —— 与初始速度越接近，奖励越大
+                origin_v = agent.get_origin_v()
+                cosine = origin_v.dot(velocity) / (la.norm(origin_v) * la.norm(velocity)) 
+                _r_v = 100 * cosine + 10 * la.norm(velocity)      
+
+            reward  =_r_d + _r_lane_change + _r_v
         return reward
 
 
@@ -468,7 +500,7 @@ class IntersectionEnvironment():
         _count = 0
 
         # 姑且采用暴力遍历方式检查相撞
-        if isinstance(agent, MotorVehicle):
+        if isinstance(agent, motorVehicle):
             _count = len(self.motor_set)
             for i in range(0, _count):
                 if agent == self.motor_set[i]:
@@ -545,23 +577,31 @@ class IntersectionEnvironment():
             return self.box_inside_polygon(vertice, self.polygons['s_w'])
 
 
-    # 是否到达目标点的测量 —— 以是否与路口大矩形相交来判断
-    def _check_arrival(self, agent):
-        # return True: if agent arrived their destination.
-        arrival = False
-        agent_box = agent.get_vertice()
-        # 2020-2-6：进入目标矩形就算到达目的地
-        des = agent.get_des_string()
-        if des == 'north':
-            arrival = self._check_obb_collision(agent_box, self.des_box['north'])
-        elif des == 'west':
-            arrival = self._check_obb_collision(agent_box, self.des_box['west'])
-        elif des == 'south':
-            arrival = self._check_obb_collision(agent_box, self.des_box['south'])
-        elif des == 'east':
-            arrival = self._check_obb_collision(agent_box, self.des_box['east'])
+    # 是否到达目标点的测量 —— 以是否与路口大矩形相交来判断（Xixi 你是不是写碰撞写到失心疯）
+    # def _check_arrival(self, agent):
+    #     # return True: if agent arrived their destination.
+    #     arrival = False
+    #     agent_box = agent.get_vertice()
+    #     # 2020-2-6：进入目标矩形就算到达目的地
+    #     des = agent.get_des_string()
+    #     if des == 'north':
+    #         arrival = self._check_obb_collision(agent_box, self.des_box['north'])
+    #     elif des == 'west':
+    #         arrival = self._check_obb_collision(agent_box, self.des_box['west'])
+    #     elif des == 'south':
+    #         arrival = self._check_obb_collision(agent_box, self.des_box['south'])
+    #     elif des == 'east':
+    #         arrival = self._check_obb_collision(agent_box, self.des_box['east'])
+    #     return arrival
 
-        return arrival
+    # 是否到达目标点 —— 用距离来判断
+    def _check_arrival(self, agent):
+        # return True: if agent arrived their destination
+        distance = la.norm(agent.get_position() - agent.get_destination())
+        if distance <= (agent.get_size_width()/2):
+            return True
+        else:
+            return False
 
 
     # return True when agent's position is out of region
@@ -644,6 +684,6 @@ class IntersectionEnvironment():
     # 环境的 reset —— 重置单个agent
     def reset(self,agent):
         # print('\n -----------agent reset---------- \n')
-        pdata.write_to_log('\n -----------agent reset---------- \n')
+        self.logger.write_to_log('\n -----------agent reset---------- \n')
         agent.reset_agent()
         return self._get_state_feature(agent)
