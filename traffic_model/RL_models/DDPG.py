@@ -2,6 +2,7 @@ from itertools import count
 
 import os, sys, random
 import numpy as np
+import numpy.linalg as la
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -75,7 +76,7 @@ class Replay_buffer_HER():
         # 这里的样本是完全随机的batch_size个
         for i in ind:
             X, Y, U, R, D = self.storage[i]
-            X_HER, Y_HER, U_HER, R_HER, D_HER = self.storage[i+1]
+            X_HER, Y_HER, U_HER, R_HER, D_HER = self.storage[(i+1) % self.max_size] 
             x.append(np.array(X, copy=False)), x.append(np.array(X_HER, copy=False))
             y.append(np.array(Y, copy=False)), y.append(np.array(Y_HER, copy=False))
             u.append(np.array(U, copy=False)), u.append(np.array(U_HER, copy=False))
@@ -137,6 +138,43 @@ class ActorHER(nn.Module):
         return x
 
 
+class ActorPedestrian(nn.Module):
+    def __init__(self, state_dim, action_dim, max_velocity):
+        super(ActorPedestrian, self).__init__()
+        self.l1 = nn.Linear(state_dim, 400)
+        self.l2 = nn.Linear(400, 300)
+        self.l3 = nn.Linear(300, action_dim)
+        self.max_velocity = max_velocity
+
+    def forward(self, x):
+        x = F.relu(self.l1(x))
+        x = F.relu(self.l2(x))
+        x = self.l3(x)  # 一个速度矢量
+        ratio = self.max_velocity / la.norm(x)
+        if ratio < 1:
+            return ratio * x
+        else:
+            return x
+
+class ActorPedestrianHER(nn.Module):
+    def __init__(self, her_state_dim, action_dim, max_velocity):
+        super(ActorPedestrianHER, self).__init__() 
+        self.l1 = nn.Linear(her_state_dim, 400) # env_state + pos_goal 的拼接维度
+        self.l2 = nn.Linear(400, 300)
+        self.l3 = nn.Linear(300, action_dim)
+        self.max_velocity = max_velocity 
+
+    def forward(self, x):
+        x = F.relu(self.l1(x))
+        x = F.relu(self.l2(x))
+        x = self.l3(x)  # 一个速度矢量
+        ratio = self.max_velocity / la.norm(x)
+        if ratio < 1:
+            return ratio * x
+        else:
+            return x
+
+
 # 评价器 ：作用就是输出 Q(s, a) 的估计
 # 也因此，在 Actor-Critic 框架中，Critic的输入元一定是 state-vector with action-vector
 class Critic(nn.Module):
@@ -166,6 +204,34 @@ class CriticHER(nn.Module):
 
     def forward(self, x, u):
         x = F.relu(self.l1(torch.cat((x, u),1)))  # x: state||goal , u: action
+        x = F.relu(self.l2(x))
+        x = self.l3(x)
+        return x
+
+
+class CriticPedestrian(nn.Module):
+    def __init__(self, state_dim, action_dim):
+        super(CriticPedestrian, self).__init__()
+        self.l1 = nn.Linear(her_state_dim + action_dim, 400)    # 输入是 state，position 和 action 的重组向量
+        self.l2 = nn.Linear(400, 300)
+        self.l3 = nn.Linear(300, 1)
+
+    def forward(self, x, u):
+        x = F.relu(self.l1(torch.cat((x, u),1)))  # x: state||goal , u: action
+        x = F.relu(self.l2(x))
+        x = self.l3(x)
+        return x
+
+
+class CriticPedestrianHER(nn.Module):
+    def __init__(self, her_state_dim, action_dim):
+        super(CriticPedestrianHER, self).__init__()
+        self.l1 = nn.Linear(her_state_dim + action_dim, 400)
+        self.l2 = nn.Linear(400, 300)
+        self.l3 = nn.Linear(300, 1)
+
+    def forward(self, x, u):
+        x = F.relu(self.l1(torch.cat((x, u),1)))  # torch.cat() 只能 concatenate 相同 shape 的 tensor
         x = F.relu(self.l2(x))
         x = self.l3(x)
         return x
@@ -377,6 +443,222 @@ class DDPG_HER(DDPG):
     def load(self, agent_type):
         file_actor = pdata.DIRECTORY +  agent_type + '_actor_HER'+ self.veer + '.pth'
         file_critic = pdata.DIRECTORY +  agent_type + '_critic_HER'+ self.veer + '.pth'
+        if os.path.exists(file_actor) and os.path.exists(file_critic):
+            self.actor.load_state_dict(torch.load(file_actor))
+            self.critic.load_state_dict(torch.load(file_critic))
+        else:
+            self.logger.write_to_log(".pth doesn't exist. Use default parameters")
+
+
+class DDPG_PE(object):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # state_dim : 状态维度
+    # action_dim： 动作维度
+    # max_action：动作限制向量
+    def __init__(self, state_dim, action_dim, max_velocity, logger):
+
+        # 存在于 GPU 的神经网络
+        self.actor = ActorPedestrian(state_dim, action_dim, max_velocity).to(device)    # origin_network
+        self.actor_target = ActorPedestrian(state_dim, action_dim, max_velocity).to(device)    # target_network
+        self.actor_target.load_state_dict(self.actor.state_dict())  # initiate actor_target with actor's parameters
+        # pytorch 中的 tensor 默认requires_grad 属性为false，即不参与梯度传播运算，特别地，opimizer中模型参数是会参与梯度优化的
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), pdata.LEARNING_RATE) # 以pdata.LEARNING_RATE指定学习率优化actor中的参数 
+
+        self.critic = CriticPedestrian(state_dim, action_dim).to(device)
+        self.critic_target = CriticPedestrian(state_dim, action_dim).to(device)
+        self.critic_target.load_state_dict(self.critic.state_dict())
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), pdata.LEARNING_RATE)
+
+        self.replay_buffer = Replay_buffer()    # initiate replay-buffer
+        # self.writer = SummaryWriter(pdata.DIRECTORY)
+        self.num_critic_update_iteration = 0
+        self.num_actor_update_iteration = 0
+        self.num_training = 0
+
+        self.logger = logger
+
+
+    def select_action(self, state):
+        state = torch.FloatTensor(state.reshape(1, -1)).to(device)
+        # numpy.ndarray.flatten(): 返回一个 ndarray对象的copy，并且将该ndarray压缩成一维数组
+        action = self.actor(state).cpu().data.numpy().flatten()
+        return action
+
+
+    # update the parameters in actor network and critic network
+    # 只有 replay_buffer 中的 storage 超过了样本数量才会调用 update函数
+    def update(self):
+
+        for it in range(pdata.UPDATE_ITERATION):
+            # Sample replay buffer
+            x, y, u, r, d = self.replay_buffer.sample(pdata.BATCH_SIZE)     # 随机获取 batch_size 个五元组样本(sample random minibatch)
+            state = torch.FloatTensor(x).to(device)
+            action = torch.FloatTensor(u).to(device)
+            next_state = torch.FloatTensor(y).to(device)
+            done = torch.FloatTensor(d).to(device)
+            reward = torch.FloatTensor(r).to(device)
+
+            # Compute the target Q value —— Q(S', A') is an value evaluated with next_state and predicted action
+            # 这里的 target_Q 是 sample 个 一维tensor
+            target_Q = self.critic_target(next_state, self.actor_target(next_state))
+            # detach(): Return a new tensor, detached from the current graph
+            # soft update of target_Q
+            target_Q = reward + ((1 - done) * pdata.GAMMA * target_Q).detach() 
+
+            # Get current Q estimate
+            current_Q = self.critic(state, action)
+
+            # Compute critic loss : a mean-square error
+            # 由论文，critic_loss 其实计算的是每个样本估计值与每个critic网络输出的均值方差
+            # torch.nn.functional.mse_loss 为计算tensor中各个元素的的均值方差
+            critic_loss = F.mse_loss(current_Q, target_Q) 
+            # self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
+            self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
+
+            # Optimize the critic
+            self.critic_optimizer.zero_grad()   # zeros the gradient buffer
+            critic_loss.backward()              # back propagation on a dynamic graph
+            self.critic_optimizer.step()
+
+            # Compute actor loss
+            # actor_loss：见论文中对公式 (6) 的理解
+            # mean()：对tensor对象求所有element的均值
+            # backward() 以梯度下降的方式更新参数，则将 actor_loss 设置为反向梯度，这样参数便往梯度上升方向更新
+            actor_loss = -self.critic(state, self.actor(state)).mean()  
+            # self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
+            self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
+
+            # Optimize the actor
+            self.actor_optimizer.zero_grad()    # Clears the gradients of all optimized torch.Tensor
+            actor_loss.backward()
+            self.actor_optimizer.step()     # perform a single optimization step
+
+            # 这里是两个 target网络的 soft update
+            for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
+                target_param.data.copy_(pdata.TAU * param.data + (1 - pdata.TAU) * target_param.data)
+
+            for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
+                target_param.data.copy_(pdata.TAU * param.data + (1 - pdata.TAU) * target_param.data)
+
+            self.num_actor_update_iteration += 1
+            self.num_critic_update_iteration += 1
+
+
+    def save(self, agent_type):
+        torch.save(self.actor.state_dict(), pdata.DIRECTORY + agent_type + '_actor.pth')
+        torch.save(self.critic.state_dict(), pdata.DIRECTORY +  agent_type + '_critic.pth')
+
+    def load(self, agent_type):
+        file_actor = pdata.DIRECTORY +  agent_type + '_actor.pth'
+        file_critic = pdata.DIRECTORY +  agent_type + '_critic.pth'
+        if os.path.exists(file_actor) and os.path.exists(file_critic):
+            self.actor.load_state_dict(torch.load(file_actor))
+            self.critic.load_state_dict(torch.load(file_critic))
+        else:
+            self.logger.write_to_log(".pth doesn't exist. Use default parameters")
+
+
+class DDPG_PE_HER(object):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # state_dim : 状态维度
+    # action_dim： 动作维度
+    # max_action：动作限制向量
+    def __init__(self, her_state_dim, action_dim, max_velocity, logger):
+
+        # 存在于 GPU 的神经网络
+        self.actor = ActorPedestrianHER(her_state_dim, action_dim, max_velocity).to(device)    # origin_network
+        self.actor_target = ActorPedestrianHER(her_state_dim, action_dim, max_velocity).to(device)    # target_network
+        self.actor_target.load_state_dict(self.actor.state_dict())  # initiate actor_target with actor's parameters
+        # pytorch 中的 tensor 默认requires_grad 属性为false，即不参与梯度传播运算，特别地，opimizer中模型参数是会参与梯度优化的
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), pdata.LEARNING_RATE) # 以pdata.LEARNING_RATE指定学习率优化actor中的参数 
+
+        self.critic = CriticPedestrian(her_state_dim, action_dim).to(device)
+        self.critic_target = CriticPedestrian(her_state_dim, action_dim).to(device)
+        self.critic_target.load_state_dict(self.critic.state_dict())
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), pdata.LEARNING_RATE)
+
+        self.replay_buffer = Replay_buffer_HER()    # initiate replay-buffer
+        # self.writer = SummaryWriter(pdata.DIRECTORY)
+        self.num_critic_update_iteration = 0
+        self.num_actor_update_iteration = 0
+        self.num_training = 0
+
+        self.logger = logger
+
+
+    def select_action(self, state):
+        state = torch.FloatTensor(state.reshape(1, -1)).to(device)
+        # numpy.ndarray.flatten(): 返回一个 ndarray对象的copy，并且将该ndarray压缩成一维数组
+        action = self.actor(state).cpu().data.numpy().flatten()
+        return action
+
+
+    # update the parameters in actor network and critic network
+    # 只有 replay_buffer 中的 storage 超过了样本数量才会调用 update函数
+    def update(self):
+
+        for it in range(pdata.UPDATE_ITERATION):
+            # Sample replay buffer
+            x, y, u, r, d = self.replay_buffer.sample(pdata.BATCH_SIZE)     # 随机获取 batch_size 个五元组样本(sample random minibatch)
+            state = torch.FloatTensor(x).to(device)
+            action = torch.FloatTensor(u).to(device)
+            next_state = torch.FloatTensor(y).to(device)
+            done = torch.FloatTensor(d).to(device)
+            reward = torch.FloatTensor(r).to(device)
+
+            # Compute the target Q value —— Q(S', A') is an value evaluated with next_state and predicted action
+            # 这里的 target_Q 是 sample 个 一维tensor
+            target_Q = self.critic_target(next_state, self.actor_target(next_state))
+            # detach(): Return a new tensor, detached from the current graph
+            # soft update of target_Q
+            target_Q = reward + ((1 - done) * pdata.GAMMA * target_Q).detach() 
+
+            # Get current Q estimate
+            current_Q = self.critic(state, action)
+
+            # Compute critic loss : a mean-square error
+            # 由论文，critic_loss 其实计算的是每个样本估计值与每个critic网络输出的均值方差
+            # torch.nn.functional.mse_loss 为计算tensor中各个元素的的均值方差
+            critic_loss = F.mse_loss(current_Q, target_Q) 
+            # self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
+            self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
+
+            # Optimize the critic
+            self.critic_optimizer.zero_grad()   # zeros the gradient buffer
+            critic_loss.backward()              # back propagation on a dynamic graph
+            self.critic_optimizer.step()
+
+            # Compute actor loss
+            # actor_loss：见论文中对公式 (6) 的理解
+            # mean()：对tensor对象求所有element的均值
+            # backward() 以梯度下降的方式更新参数，则将 actor_loss 设置为反向梯度，这样参数便往梯度上升方向更新
+            actor_loss = -self.critic(state, self.actor(state)).mean()  
+            # self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
+            self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
+
+            # Optimize the actor
+            self.actor_optimizer.zero_grad()    # Clears the gradients of all optimized torch.Tensor
+            actor_loss.backward()
+            self.actor_optimizer.step()     # perform a single optimization step
+
+            # 这里是两个 target网络的 soft update
+            for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
+                target_param.data.copy_(pdata.TAU * param.data + (1 - pdata.TAU) * target_param.data)
+
+            for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
+                target_param.data.copy_(pdata.TAU * param.data + (1 - pdata.TAU) * target_param.data)
+
+            self.num_actor_update_iteration += 1
+            self.num_critic_update_iteration += 1
+
+
+    def save(self, agent_type):
+        torch.save(self.actor.state_dict(), pdata.DIRECTORY + agent_type + '_actor_HER.pth')
+        torch.save(self.critic.state_dict(), pdata.DIRECTORY +  agent_type + '_critic_HER.pth')
+
+    def load(self, agent_type):
+        file_actor = pdata.DIRECTORY +  agent_type + '_actor_HER.pth'
+        file_critic = pdata.DIRECTORY +  agent_type + '_critic_HER.pth'
         if os.path.exists(file_actor) and os.path.exists(file_critic):
             self.actor.load_state_dict(torch.load(file_actor))
             self.critic.load_state_dict(torch.load(file_critic))

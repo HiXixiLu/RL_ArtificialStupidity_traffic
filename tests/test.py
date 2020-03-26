@@ -6,22 +6,19 @@ import matplotlib.pyplot as plt
 from numpy import linalg as la
 import threading
 
-exitFlag = 0
-
-class A():
-    def __init__(self):
-        print('class A')
 
 
-class B(A):
-    def __init__(self):
-        print('class B')
+class Pedestrian():
+    priority = 0
+    def __init__(self, index):
+        self.priority = index
 
 
-a = np.zeros(2)
-b = np.ones(2)
-combine = np.concatenate([a, b], axis = 0)
-print(combine)
-c = combine.reshape((2,2))
-print(combine)
-print(c)
+if __name__ == '__main__':
+    a = 1.0
+    b = 1
+    print(type(a), type(b))
+    if isinstance(a, float):
+        print("YaaHoo")
+    if isinstance(b, int):
+        print("Bingo")

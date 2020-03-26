@@ -63,6 +63,7 @@ class vehicle(object):
         self._width = 0.0
         self._length = 0.0
         self.logger = logger
+        self.enter_frame = 0    # 进入环境的帧数
 
 
     def __del__(self):
@@ -72,6 +73,7 @@ class vehicle(object):
         del self._destination
         del self._epsilon
         del self._des_string
+        del self.enter_frame
 
     
     # 设定初始出发点和速度
@@ -166,14 +168,16 @@ class vehicle(object):
 
     # 对外部开放的 agent 初始化函数
     # TODO: 这里要模板化
-    def initiate_agent(self, origin, veer, isHER=False):
+    def initiate_agent(self, origin, veer, isHER=False, enter_frame=0):
         '''
         param origin: 一个表示出发方向的字符串，为 'west' 'north' 'east' 'south' 四选一
         param veer: 一个表示 agent 转向的字符串，为 'left' 'straight' 'right' 三选一
         '''
         self.set_origin(origin)
         self.set_veer(veer)
-        self._vertice_in_world = self.calculate_vertice(self._position, self._velocity)   
+        self._vertice_in_world = self.calculate_vertice(self._position, self._velocity)  
+        self.enter_frame = enter_frame
+         
         if isHER:
             self.model = rl.DDPG_HER(pdata.STATE_HER_DIMENSION, pdata.ACTION_DIMENSION, pdata.MAX_MOTOR_ACTION, origin, veer, self.logger) 
         else:
@@ -277,7 +281,7 @@ class vehicle(object):
     #     elif (ac[0] - self._epsilon < 0) and (np.pi/2 - ac[0] > self._epsilon):
     #         ac[0] = - np.pi / 2
 
-    # 由加速度计算下一步长的速度
+    # 由加速度计算下一步长的速度 —— 2020-3-26：从物理模型本身防止开倒车
     def get_updated_velocity(self, ac):
         if not self.check_2darray(ac):
             return np.array([])
@@ -291,6 +295,10 @@ class vehicle(object):
             # self.crap_acceleration(ac)
             v_delta = np.array([ac_cos*v_cos - ac_sin*v_sin , ac_sin*v_cos + ac_cos*v_sin]) * ac[1]
             v_next = v_delta + self._velocity
+        # 防开倒车
+        cosv_next = v_next.dot(self._velocity) / (la.norm(v_next) * la.norm(self._velocity))
+        if cosv_next <= 0:
+            return np.zeros(2)
 
         ratio = pdata.MAX_VELOCITY / la.norm(v_next)    # 物理模型能达到的最大速度
         v_next = ratio * v_next
@@ -373,14 +381,14 @@ class motorVehicle(vehicle):
 
     def save(self):
         self.logger.write_to_log('Motor : .pth to be saved...')
-        self.model.save('motor')
+        self.model.save(pdata.AGENT_TUPLE[0])
 
     def load(self):
-        self.logger.write_to_log('Nonmotr: .pth to be loaded...')
-        self.model.load('motor')
+        self.logger.write_to_log('Motor: .pth to be loaded...')
+        self.model.load(pdata.AGENT_TUPLE[0])
 
 
-class nonMotorVehicle(vehicle):
+class Bicycle(vehicle):
     def __init__(self, logger):
         super().__init__(logger)
         self._vertice_local = np.array([[pdata.NON_MOTOR_L/2, -pdata.NON_MOTOR_W/2],
@@ -391,10 +399,11 @@ class nonMotorVehicle(vehicle):
         self._length = pdata.NON_MOTOR_L
 
     def save(self):
-        self.logger.write_to_log('Motor : .pth to be saved...')
-        self.model.save('nonmotor')
+        self.logger.write_to_log('Bicycle: .pth to be saved...')
+        self.model.save(pdata.AGENT_TUPLE[1])
 
     def load(self):
-        self.logger.write_to_log('Nonmotr: .pth to be loaded...')
-        self.model.load('nonmotor')
+        self.logger.write_to_log('Bicycle: .pth to be loaded...')
+        self.model.load(pdata.AGENT_TUPLE[1]) 
+
         

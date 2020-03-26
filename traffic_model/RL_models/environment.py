@@ -2,7 +2,7 @@ import copy
 import numpy as np 
 from numpy import linalg as la
 import public_data as pdata
-from RL_models.motor import motorVehicle
+from RL_models.vehicle import motorVehicle, Bicycle
 
 
 class IntersectionEnvironment():
@@ -23,8 +23,7 @@ class IntersectionEnvironment():
 
     def __init__(self, logger):       
         # 保存三种 agent 的集合 —— self.property 是一种实例属性
-        self.motor_set = []
-        self.nonmotor_set = []
+        self.vehicle_set = []       # TODO: 这里增加对 .enter_frame 进行排序的过程，以便计算时候能够拿到车辆运动先后顺序 —— 增加一个方法
         self.pedestrian_set = []
         self.logger = logger
         # 12个车辆合法行驶区域
@@ -190,10 +189,8 @@ class IntersectionEnvironment():
 
 
     def __del__(self):
-        self.motor_set.clear()
-        del self.motor_set
-        self.nonmotor_set.clear()
-        del self.nonmotor_set
+        self.vehicle_set.clear()
+        del self.vehicle_set
         self.pedestrian_set.clear()
         del self.pedestrian_set
         print("Diconstruction's done")
@@ -495,6 +492,7 @@ class IntersectionEnvironment():
         
 
     # Agent间的碰撞检查 —— SAT算法
+    # TODO: 针对多智能体碰撞的检测
     def _check_agent_collision(self, agent):
         collision = False
         _count = 0

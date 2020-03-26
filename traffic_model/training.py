@@ -8,7 +8,7 @@ import torch
 from RL_models import environment as env
 from RL_models import DDPG, log_util
 from RL_models import public_data as pdata
-from RL_models.motor import motorVehicle, nonMotorVehicle
+from RL_models.motor import motorVehicle, Bicycle
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -27,7 +27,7 @@ class motor_train_thread_HER(threading.Thread):
         if vehicle_str == pdata.AGENT_TUPLE[0]:
             self.agent = motorVehicle(self.logger)
         elif vehicle_str == pdata.AGENT_TUPLE[1]:
-            self.agent = nonMotorVehicle(self.logger)
+            self.agent = Bicycle(self.logger)
         # elif vehicle_str == pdata.AGENT_TUPLE[2]:
         #     self.agent == pedestrian()
 
@@ -97,7 +97,7 @@ class motor_train_thread(threading.Thread):
         if vehicle_str == pdata.AGENT_TUPLE[0]:
             self.agent = motorVehicle(self.logger)
         elif vehicle_str == pdata.AGENT_TUPLE[1]:
-            self.agent = nonMotorVehicle(self.logger)
+            self.agent = Bicycle(self.logger)
         # elif vehicle_str == pdata.AGENT_TUPLE[2]:
         #     self.agent == pedestrian()
 
