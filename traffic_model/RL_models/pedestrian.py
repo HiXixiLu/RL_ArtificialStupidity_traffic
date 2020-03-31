@@ -28,9 +28,10 @@ class pedestrian():
         self.logger = logger
         self._edge = 0      # 用于记录出发边界
         self._distance = 0.0    # 用于记录出发点距离路口的直线距离
+        self.rays = np.ones((12,3))          # 依据 a*x + b*y = c 的直线方程保存三个系数元组 a,b,c
+        self.enter_frame = 0
 
-
-    def __del__():
+    def __del__(self):
         del self._position
         del self._last_position
         del self._velocity
@@ -38,7 +39,7 @@ class pedestrian():
         del self._destination
         del self._vertice_local
         del self._vertice_in_world
-        del self.origin_pos
+        del self._origin_pos
         del self._width
         del self._length
         del self.logger
@@ -124,9 +125,9 @@ class pedestrian():
         self._vertice_in_world = self.calculate_vertice(self._position, self._origin_v)  
         self.enter_frame = enter_frame      
         if isHER == True:
-            self.model = rl.DDPG_PE_HER(pdata.STATE_HER_DIMENSION, pdata.ACTION_DIMENSION, self.logger)
+            self.model = rl.DDPG_PE_HER(pdata.STATE_HER_DIMENSION, pdata.ACTION_DIMENSION, pdata.MAX_HUMAN_VEL, self.logger)
         else:
-            self.model = rl.DDPG_PE(pdata.STATE_DIMENSION, pdata.ACTION_DIMENSION, self.logger)
+            self.model = rl.DDPG_PE(pdata.STATE_DIMENSION, pdata.ACTION_DIMENSION, pdata.MAX_HUMAN_VEL, self.logger)
 
 
     # 重置位置、速度、方向、顶点等原本就有的参数
@@ -175,7 +176,7 @@ class pedestrian():
         leng = copy.deepcopy(self._length)
         return leng
 
-     def _set_position(self, pos):
+    def _set_position(self, pos):
         if not self.check_2darray(pos):
             return
         else:

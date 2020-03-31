@@ -103,9 +103,9 @@ class Actor(nn.Module):
         super(Actor, self).__init__()   # 这里的写法是为了调用父类的构造函数
 
         """ 三层的全连接神经网络 —— 真正神经网络的部分反而很简单 """
-        self.l1 = nn.Linear(state_dim, 400)
-        self.l2 = nn.Linear(400, 300)
-        self.l3 = nn.Linear(300, action_dim)
+        self.l1 = nn.Linear(state_dim, 100)
+        self.l2 = nn.Linear(100, 75)
+        self.l3 = nn.Linear(75, action_dim)
         self.max_action = torch.FloatTensor(max_action.reshape(1, -1)).to(device) 
 
     # forward 是神经网络每一次调用时用来计算输出的 —— 必须保证输入是个 torch.Tensor
@@ -125,9 +125,9 @@ class Actor(nn.Module):
 class ActorHER(nn.Module):
     def __init__(self, her_state_dim, action_dim, max_action):
         super(ActorHER, self).__init__() 
-        self.l1 = nn.Linear(her_state_dim, 400) # eev_state + pos_goal 的拼接维度
-        self.l2 = nn.Linear(400, 300)
-        self.l3 = nn.Linear(300, action_dim)
+        self.l1 = nn.Linear(her_state_dim, 100) # eev_state + pos_goal 的拼接维度
+        self.l2 = nn.Linear(100, 75)
+        self.l3 = nn.Linear(75, action_dim)
         self.max_action = torch.FloatTensor(max_action.reshape(1, -1)).to(device) 
 
     def forward(self, x):
@@ -141,9 +141,9 @@ class ActorHER(nn.Module):
 class ActorPedestrian(nn.Module):
     def __init__(self, state_dim, action_dim, max_velocity):
         super(ActorPedestrian, self).__init__()
-        self.l1 = nn.Linear(state_dim, 400)
-        self.l2 = nn.Linear(400, 300)
-        self.l3 = nn.Linear(300, action_dim)
+        self.l1 = nn.Linear(state_dim, 100)
+        self.l2 = nn.Linear(100, 75)
+        self.l3 = nn.Linear(75, action_dim)
         self.max_velocity = max_velocity
 
     def forward(self, x):
@@ -159,9 +159,9 @@ class ActorPedestrian(nn.Module):
 class ActorPedestrianHER(nn.Module):
     def __init__(self, her_state_dim, action_dim, max_velocity):
         super(ActorPedestrianHER, self).__init__() 
-        self.l1 = nn.Linear(her_state_dim, 400) # env_state + pos_goal 的拼接维度
-        self.l2 = nn.Linear(400, 300)
-        self.l3 = nn.Linear(300, action_dim)
+        self.l1 = nn.Linear(her_state_dim, 100) # env_state + pos_goal 的拼接维度
+        self.l2 = nn.Linear(100, 75)
+        self.l3 = nn.Linear(75, action_dim)
         self.max_velocity = max_velocity 
 
     def forward(self, x):
@@ -183,9 +183,9 @@ class Critic(nn.Module):
 
         """ 还是三层的全连接神经网络 """ 
         ''' what's the meaning of actions were not included until the hidden layer of Q '''
-        self.l1 = nn.Linear(state_dim + action_dim, 400)    # 输入是 state 和 action 的重组向量
-        self.l2 = nn.Linear(400, 300)
-        self.l3 = nn.Linear(300, 1)     # 没有激活函数 —— 因为Critic网络本身就是输出价值的，不需要归一化
+        self.l1 = nn.Linear(state_dim + action_dim, 100)    # 输入是 state 和 action 的重组向量
+        self.l2 = nn.Linear(100, 75)
+        self.l3 = nn.Linear(75, 1)     # 没有激活函数 —— 因为Critic网络本身就是输出价值的，不需要归一化
 
     def forward(self, x, u):
         # x = F.relu(self.l1(torch.cat([x, u], 1)))   # torch.cat(seq, dim, out=None)
@@ -198,9 +198,9 @@ class Critic(nn.Module):
 class CriticHER(nn.Module):
     def __init__(self, her_state_dim, action_dim):
         super(CriticHER, self).__init__()
-        self.l1 = nn.Linear(her_state_dim + action_dim, 400)    # 输入是 state，position 和 action 的重组向量
-        self.l2 = nn.Linear(400, 300)
-        self.l3 = nn.Linear(300, 1)
+        self.l1 = nn.Linear(her_state_dim + action_dim, 100)    # 输入是 state，position 和 action 的重组向量
+        self.l2 = nn.Linear(100, 75)
+        self.l3 = nn.Linear(75, 1)
 
     def forward(self, x, u):
         x = F.relu(self.l1(torch.cat((x, u),1)))  # x: state||goal , u: action
@@ -212,9 +212,9 @@ class CriticHER(nn.Module):
 class CriticPedestrian(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(CriticPedestrian, self).__init__()
-        self.l1 = nn.Linear(her_state_dim + action_dim, 400)    # 输入是 state，position 和 action 的重组向量
-        self.l2 = nn.Linear(400, 300)
-        self.l3 = nn.Linear(300, 1)
+        self.l1 = nn.Linear(her_state_dim + action_dim, 100)    # 输入是 state，position 和 action 的重组向量
+        self.l2 = nn.Linear(100, 75)
+        self.l3 = nn.Linear(75, 1)
 
     def forward(self, x, u):
         x = F.relu(self.l1(torch.cat((x, u),1)))  # x: state||goal , u: action
@@ -226,9 +226,9 @@ class CriticPedestrian(nn.Module):
 class CriticPedestrianHER(nn.Module):
     def __init__(self, her_state_dim, action_dim):
         super(CriticPedestrianHER, self).__init__()
-        self.l1 = nn.Linear(her_state_dim + action_dim, 400)
-        self.l2 = nn.Linear(400, 300)
-        self.l3 = nn.Linear(300, 1)
+        self.l1 = nn.Linear(her_state_dim + action_dim, 100)
+        self.l2 = nn.Linear(100, 75)
+        self.l3 = nn.Linear(75, 1)
 
     def forward(self, x, u):
         x = F.relu(self.l1(torch.cat((x, u),1)))  # torch.cat() 只能 concatenate 相同 shape 的 tensor

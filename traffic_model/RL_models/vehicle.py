@@ -2,11 +2,12 @@ import copy
 import numpy as np 
 from numpy import linalg as la
 import public_data as pdata 
+import geometry as geo
 import DDPG as rl
 
 # 三个相对转向的目的地坐标
 relative_left = np.array([-pdata.LANE_L - pdata.LANE_W /2*3 , pdata.LANE_L + pdata.LANE_W/2])
-relative_straight = np.array([pdata.LANE_W/2, 2*pdata.LANE_L + pdata.LANE_W*2])
+relative_straight = np.array([0.0, 2*pdata.LANE_L + pdata.LANE_W*2])
 relative_right = np.array([pdata.LANE_L + pdata.LANE_W/2, pdata.LANE_L + pdata.LANE_W/2])
 
 # 四个出发点坐标
@@ -39,22 +40,24 @@ south_transform_mat = np.array([
     [0.0, 1.0, -pdata.LANE_L-pdata.LANE_W],
     [0.0, 0.0, 1.0]])
 
+# rotate90_mat = np.array([[0, -1],[1, 0]])
+# rotate30_mat = np.array([[np.cos(np.pi/6), -1/2],[1/2, np.cos(np.pi/6)]])
+
 class vehicle(object):
     # _property属性：类属性，可由该类的不同实例共享和改写，单下划线表明仅有类的实例及其子类实例可以访问
     _vector_shape = (2,)
-    _epsilon = 0.000001
-    _rotate90_mat = np.array([[0, -1],[1, 0]])
 
     def __init__(self, logger):
         # 类对象的实例变量
         self._position = np.zeros((2))  # [x, y]
-        self._last_position = self._position    # 保存上一次移动的位置
+        self._last_position = copy.deepcopy(self._position)    # 保存上一次移动的位置
         self._velocity = np.zeros((2))  # [v_x, v_y]
         self._origin_v = np.zeros((2))  # 保存初始速度用于计算奖励
-        self._destination = np.zeros((2))    # [x, y], 2020-3-18: 最终保存的目的地是世界坐标
+        self._destination_world = np.zeros((2))    # [x, y], 2020-3-18: 最终保存的目的地是世界坐标
+        self._destination_local = np.zeros((2))    # 2020-3-31：最终保存目的地是本地坐标系中的相对坐标
         # self.__acceleration = np.zeros((2))   # [φ, a], 相对当前速度矢量的转角，以及加速度的模
         # self.__policy_network = None  // 决定车辆运动的网络模型
-        self._vertice_local = np.zeros((4,2))   # 记录四个顶点的局部坐标系，一旦初始化就不变更
+        self._vertice_local = np.zeros((4, 2))   # 记录四个顶点的局部坐标系，一旦初始化就不变更
         self._vertice_in_world = np.zeros((4, 2))   # 记录的是四个顶点在世界坐标系下的坐标
         self._origin = ''
         self._veer = '' 
@@ -63,6 +66,7 @@ class vehicle(object):
         self._width = 0.0
         self._length = 0.0
         self.logger = logger
+        self._rays = []         # 2020-3-31: 依据 a*x + b*y = c 的直线方程保存三个系数元组 a,b,c
         self.enter_frame = 0    # 进入环境的帧数
 
 
@@ -70,8 +74,8 @@ class vehicle(object):
         del self._position
         del self._last_position
         del self._vector_shape
-        del self._destination
-        del self._epsilon
+        del self._destination_world
+        del self._destination_local
         del self._des_string
         del self.enter_frame
 
@@ -147,6 +151,7 @@ class vehicle(object):
                 self._des_string = 'east'
 
         # destination = np.ndarray.tolist(destination).append(1)  # 这样先 tolist() 再 append() 的链式操作会出现 destination 成为 None 的bug
+        self._destination_local = copy.deepcopy(destination)
         destination = np.ndarray.tolist(destination)
         destination.append(1)
 
@@ -161,9 +166,26 @@ class vehicle(object):
         elif self._origin == 'south':
             destination = np.matmul(south_transform_mat, destination)
 
-        self._destination = destination[0:2]    # 丢弃坐标运算添加的最后一个元素
+        self._destination_world = destination[0:2]    # 丢弃坐标运算添加的最后一个元素
         # print('destination position: {des}'.format(des = self._destination))
-        self.logger.write_to_log('destination position: {des}'.format(des = self._destination))
+        self.logger.write_to_log('destination position in world: {des}'.format(des = self._destination_world))
+
+
+    def set_rays(self):
+        unit_v = self._velocity / la.norm(self._velocity)
+        origin_ray = geo.ray(self._position, unit_v[0], unit_v[1])
+        self._rays.append(copy.deepcopy(origin_ray))
+        for i in range(1, 12):
+            origin_ray = geo.get_rotation_thirty_ray(origin_ray)
+            self._rays.append(copy.deepcopy(origin_ray))
+
+
+    def update_rays(self):
+        unit_v = self._velocity / la.norm(self._velocity)   #[cosine, sine]
+        tmp_ray = geo.ray(self._position, unit_v[0], unit_v[1])
+        for i in range(0,12):
+            self._rays[i] = copy.deepcopy(tmp_ray)
+            tmp_ray = geo.get_rotation_thirty_ray(tmp_ray)      
 
 
     # 对外部开放的 agent 初始化函数
@@ -175,6 +197,7 @@ class vehicle(object):
         '''
         self.set_origin(origin)
         self.set_veer(veer)
+        self.set_rays()
         self._vertice_in_world = self.calculate_vertice(self._position, self._velocity)  
         self.enter_frame = enter_frame
          
@@ -188,6 +211,7 @@ class vehicle(object):
     def reset_agent(self):
         self.set_origin(self._origin)
         self.set_veer( self._veer)
+        self.update_rays()
         self._vertice_in_world = self.calculate_vertice(self._position, self._velocity)
 
     # 根据python的传参特性，这里必须保证返回的是一个拷贝值
@@ -203,8 +227,12 @@ class vehicle(object):
         ve = copy.deepcopy(self._velocity)
         return ve
 
-    def get_destination(self):
-        des = copy.copy(self._destination)
+    def get_destination_world(self):
+        des = copy.copy(self._destination_world)
+        return des
+
+    def get_destination_local(self):
+        des = copy.deepcopy(self._destination_local)
         return des
 
     def get_vertice(self):
@@ -234,6 +262,10 @@ class vehicle(object):
     def get_size_length(self):
         leng = copy.deepcopy(self._length)
         return leng
+
+    def get_rays(self):
+        rays = copy.deepcopy(self._rays)
+        return rays
 
 
     def check_2darray(self, arr):
@@ -271,24 +303,14 @@ class vehicle(object):
             self._destination = des
 
 
-    # 剪切action的范围 —— 暂不用，在神经网络输出层已经有限制
-    # def crap_acceleration(self, ac):
-    #     # 这里根据学习，对于集合与类对象（可变对象），python总是自动处理为按引用传递
-    #     if not self.check_2darray(ac):
-    #         return
-    #     elif (ac[0] - self._epsilon > 0) and (ac[0] - np.pi/2 > self._epsilon):
-    #         ac[0] = np.pi / 2
-    #     elif (ac[0] - self._epsilon < 0) and (np.pi/2 - ac[0] > self._epsilon):
-    #         ac[0] = - np.pi / 2
-
     # 由加速度计算下一步长的速度 —— 2020-3-26：从物理模型本身防止开倒车
     def get_updated_velocity(self, ac):
         if not self.check_2darray(ac):
             return np.array([])
         else:
             v_t_ab = la.norm(self._velocity)
-            v_sin = self._velocity[0] / v_t_ab
-            v_cos = self._velocity[1] / v_t_ab
+            v_cos = self._velocity[0] / v_t_ab
+            v_sin = self._velocity[1] / v_t_ab
 
             ac_sin = np.sin(ac[0])
             ac_cos = np.cos(ac[0])
@@ -298,10 +320,11 @@ class vehicle(object):
         # 防开倒车
         cosv_next = v_next.dot(self._velocity) / (la.norm(v_next) * la.norm(self._velocity))
         if cosv_next <= 0:
-            return np.zeros(2)
-
-        ratio = pdata.MAX_VELOCITY / la.norm(v_next)    # 物理模型能达到的最大速度
-        v_next = ratio * v_next
+            return copy.deepcopy(pdata.EPSILON * self._velocity)
+        # 极限速度修正
+        ratio = pdata.MAX_VELOCITY / la.norm(v_next)
+        if ratio < 1:
+            v_next = ratio * v_next
         return v_next
 
 
@@ -313,27 +336,33 @@ class vehicle(object):
             print('action is invalid.')
             return
         else:
-            self._velocity = v_next
+            self._velocity = copy.deepcopy(v_next)
 
         pos_next = self._position + v_next 
         self._last_position = copy.deepcopy(self._position)
         self._position = pos_next
-        tmp_str = 'Agent Position: {pos}'.format(pos = self._position)
+        tmp_str = 'Agent Position: {pos}, Velocity Norm:{norm}'.format(pos = self._position, norm=la.norm(self._velocity))
         # print(tmp_str)
         self.logger.write_to_log(tmp_str)
         self._vertice_in_world = self.calculate_vertice(pos_next, v_next)
+        self._update_destination_local()
+
+        self.update_rays()
 
     
     # 将局部坐标系内的顶点，由 pos（决定平移） 和 vec（决定朝向）计算出在世界坐标系下的坐标 
     def calculate_vertice(self, pos, vec):
         vertice = np.zeros((4, 2))
         if pos is None or vec is None:
-            return vertice
+            return copy.deepcopy(self._vertice_in_world)
         elif pos.shape != self._vector_shape or vec.shape != self._vector_shape:
-            return vertice
+            return copy.deepcopy(self._vertice_in_world)
+        elif la.norm(vec) == 0:
+            print('Agent stop')
+            return copy.deepcopy(self._vertice_in_world)
         else:
             world_x = vec / la.norm(vec)    
-            world_y = np.matmul(self._rotate90_mat, world_x)
+            world_y = np.matmul(geo.rotate90_mat, world_x)
             rotation_mat = np.array([[world_x[0], world_y[0]],[world_x[1], world_y[1]]])
             translation_vec = np.array([pos[0], pos[1]])
             for i in range(0, 4):
@@ -341,6 +370,11 @@ class vehicle(object):
                 vertice[i] = tmp + translation_vec
             
         return vertice
+
+
+    # 更新相对坐标
+    def _update_destination_local(self):
+        self._destination_local = self._destination_world - self._position
 
 
     # 载入和保存模型参数的方式

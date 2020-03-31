@@ -2,15 +2,16 @@ import copy
 import numpy as np 
 from numpy import linalg as la
 import public_data as pdata
-from RL_models.vehicle import motorVehicle, Bicycle
+from RL_models.vehicle import motorVehicle, Bicycle, vehicle
+import pedestrian as pe
 
 
-class IntersectionEnvironment():
+class TrainingEnvironment():
     # class property —— 在整个实例化的对象中是公用的，且通常不作为实例变量使用
-    rotate30_mat = np.array([[np.cos(np.pi/6), -1/2],[1/2, np.cos(np.pi/6)]])
-    rotate90_mat = np.array([[0, -1], [1, 0]])
-    theta = np.pi / 12
-    ob_unit = 2     # 蛛网观察区域的单位腰长
+    # rotate30_mat = np.array([[np.cos(np.pi/6), -1/2],[1/2, np.cos(np.pi/6)]])
+    # rotate90_mat = np.array([[0, -1], [1, 0]])
+    # theta = np.pi / 12
+    # ob_unit = 2     # 蛛网观察区域的单位腰长
 
     # 写死的12个合法行驶区域，对应12个 出发-目的 对
     polygons = {}
@@ -204,67 +205,132 @@ class IntersectionEnvironment():
 
         return next_state, reward, done
 
+
+    # 该函数仅仅是训练时候用
     def _update_environment(self, agent, action):
-        # 更新各个agent的顶点信息、速度属性
-        # 如果有渲染线程，还需要重新渲染
         agent.update_attr(action)
 
 
     # 扇形观察区的检测(2020-1-16: 为了简化计算改用三角形替代, 正12边形观察区域)
+    # def _get_state_feature(self, agent):
+    #     state_feature = np.ones(pdata.STATE_DIMENSION)      # default dtype = float
+
+    #     pos = agent.get_position()  # agent 的位置是观察区的圆心
+    #     vec = agent.get_velocity()
+    #     vec_unit = vec / la.norm(vec)     # vec方向的单位向量
+
+    #     # 48 个区域的观察区 —— state_feature 的前 48 个维度装着通行鼓励值
+    #     # TODO: 关于其他Agent运动速度矢量穿越的衰减采集还未能完成
+    #     i, section_i = 0, 0   
+    #     tmp_unit = copy.deepcopy(vec_unit)
+    #     while i < 48:
+    #         tri_vtx = []
+    #         if i % 4 == 0:
+    #             vec_unit = copy.deepcopy(tmp_unit)
+    #             tmp_unit = np.matmul(self.rotate30_mat, vec_unit)
+    #         section_i = i % 4 + 1
+
+    #         vtx1 = pos + section_i * self.ob_unit * vec_unit
+    #         vtx2 = pos + section_i * self.ob_unit * tmp_unit
+    #         tri_vtx.append(pos)
+    #         tri_vtx.append(vtx1)
+    #         tri_vtx.append(vtx2)    # 三角区的三个顶点
+
+    #         # 三角观察区有相交: 1)三角区与其他agent的相撞 2)三角区与道路边界的相撞
+    #         if self._tri_rect_collision_test(tri_vtx, agent.get_vertice()) or self._tri_bound_collision_test(tri_vtx):
+    #             state_feature[i] = pdata.O_MAX
+    #             # 之后所有的三角形通行鼓励值都下降
+    #             i += 1
+    #             while (i % 4) != 0:
+    #                 state_feature[i] = pdata.O_MAX 
+    #                 i += 1
+    #             i -= 1
+
+    #         i += 1
+
+    #     state_feature[48], state_feature[49] = vec[0], vec[1]
+    #     state_feature[50], state_feature[51] = pos[0], pos[1]
+    #     state_feature[52] = la.norm(pos - agent.get_destination())
+
+    #     # if isinstance(agent, MotorVehicle):
+    #     #     print('Hello agent MotorVehicle.')
+
+    #     # elif isinstance(agent, NonMotorVehicle):
+    #     #     print('...')
+
+    #     # elif isinstance(agent, Pedestrian):
+    #     #     print('...')
+
+    #     # else:
+    #     #     print("Parameter agent has to be one of class MotorVehicle, NonMotorVehicle and Pedestrian.")
+
+    #     return state_feature
+
+
+    # 2020-3-30：改为12个射线检测方向，最远观察距离为上限，其余以检测到的最近距离表征
     def _get_state_feature(self, agent):
-        state_feature = np.ones(pdata.STATE_DIMENSION)      # default dtype = float
+        rays = agent.get_rays()
+        state = np.ones(pdata.STATE_DIMENSION)
+        for i in range(0, len(rays)):
+            crosspoints = self._get_crosspoints(rays[i], self.edges)
+            nearest = self._get_nearest_distance(rays[i].s_point, crosspoints)
+            if nearest > pdata.OBSERVATION_LIMIT:
+                state[i] = pdata.OBSERVATION_LIMIT
+            else:
+                state[i] = nearest
+            state[i] = state[i] / pdata.OBSERVATION_LIMIT   # Min-Max归一化
 
-        pos = agent.get_position()  # agent 的位置是观察区的圆心
-        vec = agent.get_velocity()
-        vec_unit = vec / la.norm(vec)     # vec方向的单位向量
+        start_idx = pdata.STATE_DIMENSION - 4
+        agent_v, agent_des_local = agent.get_velocity(), agent.get_destination_local()
+        state[start_idx+0] = (agent_v[0] + pdata.MAX_VELOCITY) / (2*pdata.MAX_VELOCITY)     # Min-Max归一化
+        state[start_idx+1] = (agent_v[1]+pdata.MAX_VELOCITY) / (2*pdata.MAX_VELOCITY)
+        state[start_idx+2] = (agent_des_local[0] + 2*(pdata.LANE_W + pdata.LANE_L)) / (4*(pdata.LANE_L + pdata.LANE_W))
+        state[start_idx+3] = (agent_des_local[1] + 2*(pdata.LANE_L+pdata.LANE_W)) / (4*(pdata.LANE_L + pdata.LANE_W))
+        return state
 
-        # 48 个区域的观察区 —— state_feature 的前 48 个维度装着通行鼓励值
-        # TODO: 关于其他Agent运动速度矢量穿越的衰减采集还未能完成
-        i, section_i = 0, 0   
-        tmp_unit = copy.deepcopy(vec_unit)
-        while i < 48:
-            tri_vtx = []
-            if i % 4 == 0:
-                vec_unit = copy.deepcopy(tmp_unit)
-                tmp_unit = np.matmul(self.rotate30_mat, vec_unit)
-            section_i = i % 4 + 1
 
-            vtx1 = pos + section_i * self.ob_unit * vec_unit
-            vtx2 = pos + section_i * self.ob_unit * tmp_unit
-            tri_vtx.append(pos)
-            tri_vtx.append(vtx1)
-            tri_vtx.append(vtx2)    # 三角区的三个顶点
+    def _get_nearest_distance(self, origin, pos_list):
+        nearest = float('inf')
+        for i in range(0, len(pos_list)):
+            distance = la.norm(pos_list[i] - origin)
+            if distance < nearest:
+                nearest = distance
+        return nearest
 
-            # 三角观察区有相交: 1)三角区与其他agent的相撞 2)三角区与道路边界的相撞
-            if self._tri_rect_collision_test(tri_vtx, agent.get_vertice()) or self._tri_bound_collision_test(tri_vtx):
-                state_feature[i] = pdata.O_MAX
-                # 之后所有的三角形通行鼓励值都下降
-                i += 1
-                while (i % 4) != 0:
-                    state_feature[i] = pdata.O_MAX 
-                    i += 1
-                i -= 1
 
-            i += 1
+    # 直线方程： ax + by = c
+    def _get_crosspoints(self, ray, box_vertices):
+        points = []
+        for i in range(0, len(box_vertices)):
+            seg = [box_vertices[i], box_vertices[(i+1)%len(box_vertices)]]
+            if self._cross_check(seg, ray):
+                seg_a = (seg[1][1]-seg[0][1]) / (seg[1][0] - seg[0][0])
+                seg_b = 1.0
+                seg_c = -seg_a * seg[0][0] + seg[0][1]
+                point = la.solve(np.array([[ray.sin, -ray.cos], [seg_a, seg_b]]), np.array([ray.sin*ray.s_point[0]+ray.cos*ray.s_point[1], seg_c]))
+                points.append(copy.deepcopy(point))
+        return points
 
-        state_feature[48], state_feature[49] = vec[0], vec[1]
-        state_feature[50], state_feature[51] = pos[0], pos[1]
-        state_feature[52] = la.norm(pos - agent.get_destination())
+    def _get_crosspoints(self, ray, seg_list):
+        points = []
+        for i in range(0, len(seg_list)):
+            seg = seg_list[i]
+            if self._cross_check(seg, ray):
+                seg_a = (seg[1][1]-seg[0][1]) / (seg[1][0] - seg[0][0] if seg[1][0] - seg[0][0] else pdata.EPSILON)
+                seg_b = 1.0
+                seg_c = -seg_a * seg[0][0] + seg[0][1]
+                point = la.solve(np.array([[ray.sin, -ray.cos], [seg_a, seg_b]]), np.array([ray.sin*ray.s_point[0]+ray.cos*ray.s_point[1], seg_c]))
+                points.append(copy.deepcopy(point))
+        return points  
 
-        # if isinstance(agent, MotorVehicle):
-        #     print('Hello agent MotorVehicle.')
 
-        # elif isinstance(agent, NonMotorVehicle):
-        #     print('...')
-
-        # elif isinstance(agent, Pedestrian):
-        #     print('...')
-
-        # else:
-        #     print("Parameter agent has to be one of class MotorVehicle, NonMotorVehicle and Pedestrian.")
-
-        return state_feature
-
+    # 端点异侧返回 True，否则返回 False
+    def _cross_check(self, seg, ray):
+        vec1, vec2 = seg[0] - ray.s_point, seg[1] - ray.s_point
+        unit = np.array([ray.cos, ray.sin])
+        res = np.cross(unit, vec1) * np.cross(unit, vec2)
+        return res < 0
+            
 
     # when collision happened, return true
     # 需要逆时针排列的顶点坐标: tri_vtx.shape=(3,2), rect_vtx.shape=(4,2)
@@ -399,7 +465,7 @@ class IntersectionEnvironment():
 
         # 主线奖励：进入目的地、进入与目的地不符的区域、发生车辆行人碰撞，都会采用主线奖励
         if self._check_agent_collision(agent):
-            reward = -5000
+            reward = -pdata.MAIN_REWARD
             self.logger.write_to_log('<agent collided>')
             return reward
         # elif not self._check_bound(agent):  # 包括越出仿真区域、开到左车道都会直接终止
@@ -407,34 +473,36 @@ class IntersectionEnvironment():
         #     self.logger.write_to_log('<agent out of bound>')
         #     return reward
         elif self._check_arrival(agent):
-            reward = 5000
+            reward = pdata.MAIN_REWARD
             self.logger.write_to_log('<agent arrived>')
             return reward
         elif self._check_outside_region(agent):
-            reward = -5000
+            reward = -pdata.MAIN_REWARD
             self.logger.write_to_log('<agent out>')
             return reward
 
         # 接近奖励 —— 允许的最大速度的模也仅仅只有 0.69 m/frame
-        delta_d = la.norm(agent.get_last_position() - agent.get_destination()) - la.norm(agent.get_position() - agent.get_destination())
-        _r_d = 300 * delta_d
+        delta_d = la.norm(agent.get_last_position() - agent.get_destination_world()) - la.norm(agent.get_position() - agent.get_destination_world())
+        _r_d = 10 * delta_d
 
         # 保持车道奖励
         if self._check_bound(agent):
-            _r_lane_change = 300
+            _r_lane_change = 10
         else:
-            _r_lane_change = -300
+            _r_lane_change = -10
 
         # 速度奖励
         velocity = agent.get_velocity()
-        if la.norm(velocity) >= pdata.VELOCITY_LIMIT:
-            # _r_v = -300  
-            _r_v = -600
-        else:
+        norm_v = la.norm(velocity)
+        if  norm_v >= pdata.VELOCITY_LIMIT:
+            _r_v = -10 * (norm_v - pdata.VELOCITY_LIMIT)
+        elif norm_v:
             # cos奖励 —— 与初始速度越接近，奖励越大
             origin_v = agent.get_origin_v()
-            cosine = origin_v.dot(velocity) / (la.norm(origin_v) * la.norm(velocity)) 
-            _r_v = 100 * cosine + 10 * la.norm(velocity)                 
+            cosine = origin_v.dot(velocity) / (la.norm(origin_v) * norm_v) 
+            _r_v = 10 * cosine + 10 * norm_v  
+        else:
+            _r_v = 0
 
         # if isinstance(agent, MotorVehicle):     # 包导入路径的写法都会影响 isinstance()的准确性
         #     print('Hello agent MotorVehicle.')
@@ -453,39 +521,44 @@ class IntersectionEnvironment():
         self.logger.write_to_log('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
         return reward 
 
-    # 除了移动目标不一致，其余与
+
+    # 除了移动目标不一致，其余与 _get_reward 相同
     def get_her_reward(self, agent, normal_reward, future_pos):
-        if abs(normal_reward) == 5000:
+        # future_pos 是相对坐标
+        if abs(normal_reward) == pdata.MAIN_REWARD:
             reward = normal_reward
         else:
             # 接近奖励 —— 允许的最大速度的模也仅仅只有 0.69 m/frame
-            delta_d = la.norm(agent.get_last_position() - future_pos)
-            _r_d = 300 * delta_d
+            delta_d = la.norm(future_pos)
+            _r_d = 10 * delta_d
 
             # 保持车道奖励
             if self._check_bound(agent):
-                _r_lane_change = 300
+                _r_lane_change = 10
             else:
-                _r_lane_change = -300
+                _r_lane_change = -10
 
-            # 速度奖励
+             # 速度奖励
             velocity = agent.get_velocity()
-            if la.norm(velocity) >= pdata.VELOCITY_LIMIT:
-                # _r_v = -300  
-                _r_v = -600
-            else:
+            norm_v = la.norm(velocity)
+            if  norm_v >= pdata.VELOCITY_LIMIT:
+                _r_v = -10 * (norm_v - pdata.VELOCITY_LIMIT)
+            elif norm_v:
                 # cos奖励 —— 与初始速度越接近，奖励越大
                 origin_v = agent.get_origin_v()
-                cosine = origin_v.dot(velocity) / (la.norm(origin_v) * la.norm(velocity)) 
-                _r_v = 100 * cosine + 10 * la.norm(velocity)      
+                cosine = origin_v.dot(velocity) / (la.norm(origin_v) * norm_v) 
+                _r_v = 10 * cosine + 10 * norm_v  
+            else:
+                _r_v = 0          
 
             reward  =_r_d + _r_lane_change + _r_v
+            self.logger.write_to_log('reward_her: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
         return reward
 
 
     # 检查是否终止
     def _check_termination(self, reward):
-        if abs(reward) == 5000:
+        if abs(reward) == pdata.MAIN_REWARD:
             return True
         else:
             return False
@@ -499,11 +572,11 @@ class IntersectionEnvironment():
 
         # 姑且采用暴力遍历方式检查相撞
         if isinstance(agent, motorVehicle):
-            _count = len(self.motor_set)
+            _count = len(self.vehicle_set)
             for i in range(0, _count):
-                if agent == self.motor_set[i]:
+                if agent == self.vehicle_set[i]:
                     continue
-                elif self._check_bilateral_collision(agent, self.motor_set):
+                elif self._check_bilateral_collision(agent, self.vehicle_set):
                     collision = True
             collision = False            
 
@@ -595,7 +668,7 @@ class IntersectionEnvironment():
     # 是否到达目标点 —— 用距离来判断
     def _check_arrival(self, agent):
         # return True: if agent arrived their destination
-        distance = la.norm(agent.get_position() - agent.get_destination())
+        distance = la.norm(agent.get_position() - agent.get_destination_world())
         if distance <= (agent.get_size_width()/2):
             return True
         else:
@@ -624,8 +697,8 @@ class IntersectionEnvironment():
     def get_render_info(self):
         info_list = []
         # TODO: 后期加入非机动车、行人的更新代码
-        for i in range(0, len(self.motor_set)):
-            vertice = self.motor_set[i].get_vertice()
+        for i in range(0, len(self.vehicle_set)):
+            vertice = self.vehicle_set[i].get_vertice()
             info_list.append(vertice)   # 不能直接往numpy数组里添加元素，要先使用python原生list
 
         info_list = np.array(info_list)  
@@ -685,3 +758,18 @@ class IntersectionEnvironment():
         self.logger.write_to_log('\n -----------agent reset---------- \n')
         agent.reset_agent()
         return self._get_state_feature(agent)
+
+
+class IntersectionEnvironment():
+    vehicle_set = []
+    pedestrian_set = []
+
+    def add_agent_to_environment(self, agent):
+        if isinstance(agent, vehicle):
+            self.vehicle_set.append(agent)
+        if isinstance(agent, pe):
+            self.pedestrian_set.append(agent)
+
+    def generate_priority_queue(self):
+        self.vehicle_set.sort(key = lambda x : x.enter_frame)
+        self.pedestrian_set.sort(key = lambda x : x.enter_frame)

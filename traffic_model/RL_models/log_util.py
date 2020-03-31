@@ -3,7 +3,7 @@ import public_data as pdata
 
 
 ''' 文件的保存路径 '''
-DIRECTORY = 'D:\\python_project\\TrafficModel\\traffic_model\\data\\'  # 该文件路径只能这么暂时写死，这是典型的windows路径写法
+DIRECTORY = pdata.DIRECTORY
 
 class logWriter():
     ''' 文件生成的时间 '''

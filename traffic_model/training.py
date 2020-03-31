@@ -1,6 +1,6 @@
 from itertools import count
 import os, sys, random, time  
-sys.path.append(os.getcwd() + '\\traffic_model\\RL_models')     # 在sys.path里动态添加了路径后，python才能找到项目中的模块
+sys.path.append(os.getcwd() + '/traffic_model/RL_models')     # 在sys.path里动态添加了路径后，python才能找到项目中的模块
 import threading
 import json
 import numpy as np
@@ -8,7 +8,7 @@ import torch
 from RL_models import environment as env
 from RL_models import DDPG, log_util
 from RL_models import public_data as pdata
-from RL_models.motor import motorVehicle, Bicycle
+from RL_models.vehicle import motorVehicle, Bicycle
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -22,7 +22,7 @@ class motor_train_thread_HER(threading.Thread):
         self._origin_idx = origin_idx
         self._veer_idx = veer_idx
         self.logger = log_util.logWriter(vehicle_str+'_HER')
-        self.roads = env.IntersectionEnvironment(self.logger)
+        self.roads = env.TrainingEnvironment(self.logger)
 
         if vehicle_str == pdata.AGENT_TUPLE[0]:
             self.agent = motorVehicle(self.logger)
@@ -42,7 +42,7 @@ class motor_train_thread_HER(threading.Thread):
             if pdata.LOAD: 
                 self.agent.load()     # 决定了是否导入已有的模型
 
-            final_goal = self.agent.get_destination()
+            final_goal = self.agent.get_destination_local() #相对坐标
 
             for i in range(pdata.MAX_EPISODE):
                 state = self.roads.reset(self.agent)      # state 的维数要尤其注意               
@@ -65,8 +65,7 @@ class motor_train_thread_HER(threading.Thread):
                     self.agent.add_to_replaybuffer(state_her, next_state_her, action, reward, np.float(done))
 
                     # add future to replay buffer
-                    future_pos = np.zeros(2)
-                    future_pos[0], future_pos[1] = next_state[50], next_state[51]
+                    future_pos[0], future_pos[1] = next_state[14], next_state[15]
                     state_her = np.concatenate([state, future_pos], axis = 0)
                     next_state_her = np.concatenate([next_state, future_pos], axis = 0)
                     reward_her = self.roads.get_her_reward(self.agent, reward, future_pos)
@@ -92,7 +91,7 @@ class motor_train_thread(threading.Thread):
         self._origin_idx = origin_idx
         self._veer_idx = veer_idx
         self.logger = log_util.logWriter(vehicle_str)
-        self.roads = env.IntersectionEnvironment(self.logger)
+        self.roads = env.TrainingEnvironment(self.logger)
 
         if vehicle_str == pdata.AGENT_TUPLE[0]:
             self.agent = motorVehicle(self.logger)
@@ -120,7 +119,7 @@ class motor_train_thread(threading.Thread):
                 for t in count():
                     action = self.agent.select_action(state)
 
-                    # issue 3 add noise to action 
+                    # add noise to action 
                     noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_SD)])
                     action = action + noise
                     if(abs(action[0]) > pdata.MAX_MOTOR_ACTION[0]):
