@@ -1,3 +1,5 @@
+import sys,os
+sys.path.append(os.getcwd() + '/traffic_model/RL_models')
 import numpy as np
 import numpy.linalg as la
 import matplotlib.pyplot as plt

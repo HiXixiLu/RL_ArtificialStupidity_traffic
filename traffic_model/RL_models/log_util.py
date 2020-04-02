@@ -1,4 +1,5 @@
 import os,sys,time
+sys.path.append(os.getcwd() + '/traffic_model/RL_models')     # 在sys.path里动态添加了路径后，python才能找到项目中的模块
 import public_data as pdata
 
 
@@ -8,8 +9,8 @@ DIRECTORY = pdata.DIRECTORY
 class logWriter():
     ''' 文件生成的时间 '''
     def __init__(self, mark_str):
-        self.START_TIME = time.strftime("%Y-%m-%d_%H-%M", time.localtime(time.time()))
-        self.EXPERIMENT_LOG = open(DIRECTORY + self.START_TIME + '_' + mark_str +'.txt', 'a+')
+        self.START_TIME = time.strftime("%m-%d_%H-%M", time.localtime(time.time()))
+        self.EXPERIMENT_LOG = open(DIRECTORY + self.START_TIME + '_' + mark_str +'.txt', 'w')
 
     def __del__(self):
         self.record_end_time()
@@ -22,7 +23,7 @@ class logWriter():
         self.write_to_log('END TIME: {end}'.format(end=time.strftime("%Y-%m-%d_%H-%M-%S",time.localtime(time.time()))))
 
     def write_to_log(self, content_str):
-        print(content_str, file = self.EXPERIMENT_LOG)
+        self.EXPERIMENT_LOG.write(content_str)
 
     def close_file(self):
         self.EXPERIMENT_LOG.close()

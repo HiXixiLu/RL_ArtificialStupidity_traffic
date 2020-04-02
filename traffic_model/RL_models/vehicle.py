@@ -1,4 +1,6 @@
-import copy
+import sys,os
+sys.path.append(os.getcwd() + '/traffic_model/RL_models')
+import copy,math
 import numpy as np 
 from numpy import linalg as la
 import public_data as pdata 
@@ -69,16 +71,6 @@ class vehicle(object):
         self._rays = []         # 2020-3-31: 依据 a*x + b*y = c 的直线方程保存三个系数元组 a,b,c
         self.enter_frame = 0    # 进入环境的帧数
 
-
-    def __del__(self):
-        del self._position
-        del self._last_position
-        del self._vector_shape
-        del self._destination_world
-        del self._destination_local
-        del self._des_string
-        del self.enter_frame
-
     
     # 设定初始出发点和速度
     def set_origin(self, origin):
@@ -113,7 +105,7 @@ class vehicle(object):
     # 设置 agent 的转向 —— 这是为了让 agent 的运动与具体地形解耦
     def set_veer(self, des):
         if not isinstance(des, str):
-            print("set_veer function argument require an instance of class 'str' !")
+            # print("set_veer function argument require an instance of class 'str' !")
             return
 
         self._veer = des
@@ -172,7 +164,7 @@ class vehicle(object):
 
 
     def set_rays(self):
-        unit_v = self._velocity / la.norm(self._velocity)
+        unit_v = self._velocity / (la.norm(self._velocity) + pdata.EPSILON)
         origin_ray = geo.ray(self._position, unit_v[0], unit_v[1])
         self._rays.append(copy.deepcopy(origin_ray))
         for i in range(1, 12):
@@ -181,7 +173,7 @@ class vehicle(object):
 
 
     def update_rays(self):
-        unit_v = self._velocity / la.norm(self._velocity)   #[cosine, sine]
+        unit_v = self._velocity / (la.norm(self._velocity) + pdata.EPSILON)  #[cosine, sine]
         tmp_ray = geo.ray(self._position, unit_v[0], unit_v[1])
         for i in range(0,12):
             self._rays[i] = copy.deepcopy(tmp_ray)
@@ -270,10 +262,10 @@ class vehicle(object):
 
     def check_2darray(self, arr):
         if not isinstance(arr, np.ndarray):
-            print('Function needs an numpy ndarray argument')
+            # print('Function needs an numpy ndarray argument')
             return False
         elif arr.shape != self._vector_shape:
-            print('The shape of input requires an 1D numpy array with 2 elements')
+            # print('The shape of input requires an 1D numpy array with 2 elements')
             return False
         else:
             return True
@@ -309,8 +301,8 @@ class vehicle(object):
             return np.array([])
         else:
             v_t_ab = la.norm(self._velocity)
-            v_cos = self._velocity[0] / v_t_ab
-            v_sin = self._velocity[1] / v_t_ab
+            v_cos = self._velocity[0] / (v_t_ab + pdata.EPSILON)
+            v_sin = self._velocity[1] / (v_t_ab + pdata.EPSILON)
 
             ac_sin = np.sin(ac[0])
             ac_cos = np.cos(ac[0])
@@ -318,11 +310,11 @@ class vehicle(object):
             v_delta = np.array([ac_cos*v_cos - ac_sin*v_sin , ac_sin*v_cos + ac_cos*v_sin]) * ac[1]
             v_next = v_delta + self._velocity
         # 防开倒车
-        cosv_next = v_next.dot(self._velocity) / (la.norm(v_next) * la.norm(self._velocity))
+        cosv_next = v_next.dot(self._velocity) / (la.norm(v_next) * la.norm(self._velocity) + pdata.EPSILON)
         if cosv_next <= 0:
             return copy.deepcopy(pdata.EPSILON * self._velocity)
         # 极限速度修正
-        ratio = pdata.MAX_VELOCITY / la.norm(v_next)
+        ratio = pdata.MAX_VELOCITY / (la.norm(v_next) + pdata.EPSILON)
         if ratio < 1:
             v_next = ratio * v_next
         return v_next
@@ -333,7 +325,7 @@ class vehicle(object):
         v_next = self.get_updated_velocity(action)
 
         if len(v_next) == 0:
-            print('action is invalid.')
+            # print('action is invalid.')
             return
         else:
             self._velocity = copy.deepcopy(v_next)
@@ -346,22 +338,22 @@ class vehicle(object):
         self.logger.write_to_log(tmp_str)
         self._vertice_in_world = self.calculate_vertice(pos_next, v_next)
         self._update_destination_local()
-
         self.update_rays()
 
     
     # 将局部坐标系内的顶点，由 pos（决定平移） 和 vec（决定朝向）计算出在世界坐标系下的坐标 
     def calculate_vertice(self, pos, vec):
         vertice = np.zeros((4, 2))
+        vec_norm = la.norm(vec)
         if pos is None or vec is None:
             return copy.deepcopy(self._vertice_in_world)
         elif pos.shape != self._vector_shape or vec.shape != self._vector_shape:
             return copy.deepcopy(self._vertice_in_world)
-        elif la.norm(vec) == 0:
-            print('Agent stop')
+        elif math.isclose(vec_norm, 0.0):
+            # print('Agent stop')
             return copy.deepcopy(self._vertice_in_world)
         else:
-            world_x = vec / la.norm(vec)    
+            world_x = vec / vec_norm    
             world_y = np.matmul(geo.rotate90_mat, world_x)
             rotation_mat = np.array([[world_x[0], world_y[0]],[world_x[1], world_y[1]]])
             translation_vec = np.array([pos[0], pos[1]])
@@ -415,11 +407,11 @@ class motorVehicle(vehicle):
 
     def save(self):
         self.logger.write_to_log('Motor : .pth to be saved...')
-        self.model.save(pdata.AGENT_TUPLE[0])
+        self.model.save(pdata.AGENT_TUPLE[0]+'_'+self._origin+'_'+self._veer)
 
     def load(self):
         self.logger.write_to_log('Motor: .pth to be loaded...')
-        self.model.load(pdata.AGENT_TUPLE[0])
+        self.model.load(pdata.AGENT_TUPLE[0]+'_'+self._origin+'_'+self._veer)
 
 
 class Bicycle(vehicle):
@@ -434,10 +426,10 @@ class Bicycle(vehicle):
 
     def save(self):
         self.logger.write_to_log('Bicycle: .pth to be saved...')
-        self.model.save(pdata.AGENT_TUPLE[1])
+        self.model.save(pdata.AGENT_TUPLE[1]+'_'+self._origin+'_'+self._veer)
 
     def load(self):
         self.logger.write_to_log('Bicycle: .pth to be loaded...')
-        self.model.load(pdata.AGENT_TUPLE[1]) 
+        self.model.load(pdata.AGENT_TUPLE[1]+'_'+self._origin+'_'+self._veer) 
 
         

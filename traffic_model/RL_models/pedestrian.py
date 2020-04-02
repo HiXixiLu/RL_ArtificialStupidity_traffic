@@ -1,7 +1,10 @@
+import sys,os
+sys.path.append(os.getcwd() + '/traffic_model/RL_models')
 import copy
 import numpy as np 
 from numpy import linalg as la
 import public_data as pdata 
+import geometry as geo
 import DDPG as rl
 
 
@@ -15,7 +18,8 @@ class pedestrian():
         self._position = np.zeros((2))  # [x, y]
         self._last_position = self._position    # 保存上一次移动的位置
         self._origin_v = np.zeros((2))  # 保存初始速度用于计算奖励
-        self._destination = np.zeros((2))    # [x, y], 2020-3-18: 最终保存的目的地是世界坐标
+        self._destination_world = np.zeros((2))    
+        self._destination_local = np.zeros((2))
         self._vertice_local = np.array([[pdata.P_L/2, -pdata.P_W/2],
         [pdata.P_L/2, pdata.P_W/2],
         [-pdata.P_L/2, pdata.P_W/2],
@@ -28,21 +32,8 @@ class pedestrian():
         self.logger = logger
         self._edge = 0      # 用于记录出发边界
         self._distance = 0.0    # 用于记录出发点距离路口的直线距离
-        self.rays = np.ones((12,3))          # 依据 a*x + b*y = c 的直线方程保存三个系数元组 a,b,c
+        self._rays = []          # 依据 a*x + b*y = c 的直线方程保存三个系数元组 a,b,c
         self.enter_frame = 0
-
-    def __del__(self):
-        del self._position
-        del self._last_position
-        del self._velocity
-        del self._origin_v
-        del self._destination
-        del self._vertice_local
-        del self._vertice_in_world
-        del self._origin_pos
-        del self._width
-        del self._length
-        del self.logger
 
 
     def check_2darray(self, arr):
@@ -64,7 +55,7 @@ class pedestrian():
         elif pos.shape != self._vector_shape or vec.shape != self._vector_shape:
             return vertice
         else:
-            world_x = vec / la.norm(vec)    
+            world_x = vec / (la.norm(vec) + pdata.EPSILON)    
             world_y = np.matmul(self._rotate90_mat, world_x)
             rotation_mat = np.array([[world_x[0], world_y[0]],[world_x[1], world_y[1]]])
             translation_vec = np.array([pos[0], pos[1]])
@@ -85,43 +76,61 @@ class pedestrian():
 
         if edge == 0:
             self._origin_pos = np.array([-pdata.LANE_W-distance, -pdata.LANE_W + self._width/2])
-            self._destination = self._origin_pos + np.array([0.0, 2 * pdata.LANE_W])
+            self._destination_world = self._origin_pos + np.array([0.0, 2 * pdata.LANE_W])
             self._origin_v = np.array([0.0, 1.0 / pdata.FPS])
         elif edge == 1:
             self._origin_pos = np.array([-pdata.LANE_W + self._width/2, -pdata.LANE_W-distance])
-            self._destination = self._origin_pos + np.array([2 * pdata.LANE_W, 0.0])
+            self._destination_world = self._origin_pos + np.array([2 * pdata.LANE_W, 0.0])
             self._origin_v = np.array([1.0 / pdata.FPS, 0.0])
         elif edge == 2:
             self._origin_pos = np.array([pdata.LANE_W - self._width/2, -pdata.LANE_W-distance])
-            self._destination = self._origin_pos + np.array([-2 * pdata.LANE_W, 0.0])
+            self._destination_world = self._origin_pos + np.array([-2 * pdata.LANE_W, 0.0])
             self._origin_v = np.array([-1.0/pdata.LANE_W , 0.0])
         elif edge == 3:
             self._origin_pos = np.array([pdata.LANE_W + distance, -pdata.LANE_W + self._width/2])
-            self._destination = self._origin_pos + np.array([0.0, 2* pdata.LANE_W])
+            self._destination_world = self._origin_pos + np.array([0.0, 2* pdata.LANE_W])
             self._origin_v = np.array([0.0, 1.0/pdata.FPS])
         elif edge == 4:
             self._origin_pos = np.array([pdata.LANE_W + distance, pdata.LANE_W - self._width/2])
-            self._destination = self._origin_pos + np.array([0.0, -2*pdata.LANE_W])
+            self._destination_world = self._origin_pos + np.array([0.0, -2*pdata.LANE_W])
             self._origin_v = np.array([0.0, -1.0/pdata.FPS])
         elif edge == 5:
             self._origin_pos = np.array([pdata.LANE_W - self._width /2, pdata.LANE_W + distance])
-            self._destination = self._origin_pos + np.array([-2*pdata.LANE_W, 0.0])
+            self._destination_world = self._origin_pos + np.array([-2*pdata.LANE_W, 0.0])
             self._origin_v = np.array([-1.0/pdata.LANE_W, 0.0])
         elif edge == 6:
             self._origin_pos = np.array([-pdata.LANE_W+self._width/2, pdata.LANE_W + distance])
-            self._destination = self._origin_pos + np.array([2*pdata.LANE_W, 0.0])
+            self._destination_world = self._origin_pos + np.array([2*pdata.LANE_W, 0.0])
             self._origin_v = np.array([1.0/pdata.LANE_W, 0.0])
         elif edge == 7:
             self._origin_pos = np.array([-pdata.LANE_W-distance, pdata.LANE_W - self._width/2])
-            self._destination = self._origin_pos + np.array([0.0, -2*pdata.LANE_W])
+            self._destination_world = self._origin_pos + np.array([0.0, -2*pdata.LANE_W])
             self._origin_v = np.array([0.0, -1.0/pdata.LANE_W])  
 
         self._edge = edge
         self._distance = distance
 
 
+    def set_rays(self):
+        unit_v = self._velocity / (la.norm(self._velocity) + pdata.EPSILON)
+        origin_ray = geo.ray(self._position, unit_v[0], unit_v[1])
+        self._rays.append(copy.deepcopy(origin_ray))
+        for i in range(1, 12):
+            origin_ray = geo.get_rotation_thirty_ray(origin_ray)
+            self._rays.append(copy.deepcopy(origin_ray))
+
+
+    def update_rays(self):
+        unit_v = self._velocity / (la.norm(self._velocity) + pdata.EPSILON)  #[cosine, sine]
+        tmp_ray = geo.ray(self._position, unit_v[0], unit_v[1])
+        for i in range(0,12):
+            self._rays[i] = copy.deepcopy(tmp_ray)
+            tmp_ray = geo.get_rotation_thirty_ray(tmp_ray)   
+
+
     def initiate_agent(self, origin_edge, distance, isHER = False, enter_frame=0):
-        self.set_origin(origin_edge, distance)   
+        self.set_origin(origin_edge, distance)
+        self.set_rays()   
         self._vertice_in_world = self.calculate_vertice(self._position, self._origin_v)  
         self.enter_frame = enter_frame      
         if isHER == True:
@@ -134,6 +143,7 @@ class pedestrian():
     def reset_agent(self):
         self.set_origin(self._edge, self._distance)
         self._vertice_in_world = self.calculate_vertice(self._position, self._origin_v)
+        self.update_rays()
 
     # 根据python的传参特性，这里必须保证返回的是一个拷贝值
     def get_position(self):
@@ -148,8 +158,12 @@ class pedestrian():
         ve = copy.deepcopy(self._velocity)
         return ve
 
-    def get_destination(self):
-        des = copy.copy(self._destination)
+    def get_destination_world(self):
+        des = copy.deepcopy(self._destination_world)
+        return des
+
+    def get_destination_local(self):
+        des = copy.deepcopy(self._destination_local)
         return des
 
     def get_vertice(self):
@@ -176,6 +190,10 @@ class pedestrian():
         leng = copy.deepcopy(self._length)
         return leng
 
+    def get_rays(self):
+        rays = copy.deepcopy(self._rays)
+        return rays
+
     def _set_position(self, pos):
         if not self.check_2darray(pos):
             return
@@ -187,6 +205,7 @@ class pedestrian():
             return
         else:
             self._velocity = copy.deepcopy(v)
+
 
     # 特殊地，允许行人往回跑
     def update_attr(self, vel):

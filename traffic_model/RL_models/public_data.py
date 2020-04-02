@@ -31,7 +31,7 @@ STATE_DIMENSION = OBSERVATION_DIMENSION + 4    # 见毕业论文
 STATE_HER_DIMENSION = STATE_DIMENSION + 2   # 2: 作为 goal 的position维度
 ACTION_DIMENSION = 2
 MAIN_REWARD = 300
-EPSILON = 0.0001
+EPSILON = 1e-6
 
 TAU = 0.005     # target smoothing coefficient：从current网络往target网络里更新参数用
 TARGET_UPDATE_INTERVAL = 1

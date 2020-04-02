@@ -1,3 +1,5 @@
+import sys,os
+sys.path.append(os.getcwd() + '/traffic_model/RL_models')
 import copy
 import numpy as np 
 from numpy import linalg as la
@@ -721,12 +723,12 @@ class TrainingEnvironment():
 
         _rows = polygon.shape[0]
         for i in range(_rows):
-            _start, _end = polygon[i], polygon[(i+1)%_rows]
+            _start, _end = polygon[i], polygon[(i+1)%_rows] 
             radio_y = point[1]      # 以x轴的平行线作为射线
             left_count , right_count = 0, 0
 
             if((_start[1] - radio_y) * (_end[1] - radio_y) < 0):
-                slope = (_start[1] - _end[1]) / (_start[0] - _end[1])
+                slope = (_start[1] - _end[1]) / ((_start[0] - _end[1]) + pdata.EPSILON)
                 cross_x = (radio_y - _start[1]) / slope + _start[0]
                 if cross_x < point[0]:
                     left_count += 1
@@ -773,3 +775,5 @@ class IntersectionEnvironment():
     def generate_priority_queue(self):
         self.vehicle_set.sort(key = lambda x : x.enter_frame)
         self.pedestrian_set.sort(key = lambda x : x.enter_frame)
+
+        

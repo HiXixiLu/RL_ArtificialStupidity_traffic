@@ -1,6 +1,6 @@
 from itertools import count
-
 import os, sys, random
+sys.path.append(os.getcwd() + '/traffic_model/RL_models')
 import numpy as np
 import numpy.linalg as la
 import torch
@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Normal
-from tensorboardX import SummaryWriter
+# from tensorboardX import SummaryWriter
 
 import public_data as pdata  #相对路径问题
 
@@ -338,13 +338,13 @@ class DDPG(object):
             self.num_critic_update_iteration += 1
 
 
-    def save(self, agent_type):
-        torch.save(self.actor.state_dict(), pdata.DIRECTORY + agent_type + '_actor_'+ self.veer + '.pth')
-        torch.save(self.critic.state_dict(), pdata.DIRECTORY +  agent_type + '_critic_' + self.veer + '.pth')
+    def save(self, mark_str):
+        torch.save(self.actor.state_dict(), pdata.DIRECTORY + mark_str + '_actor.pth')
+        torch.save(self.critic.state_dict(), pdata.DIRECTORY +  mark_str + '_critic.pth')
 
-    def load(self, agent_type):
-        file_actor = pdata.DIRECTORY +  agent_type + '_actor_'+ self.veer + '.pth'
-        file_critic = pdata.DIRECTORY +  agent_type + '_critic_'+ self.veer + '.pth'
+    def load(self, mark_str):
+        file_actor = pdata.DIRECTORY +  mark_str + '_actor.pth'
+        file_critic = pdata.DIRECTORY +  mark_str + '_critic.pth'
         if os.path.exists(file_actor) and os.path.exists(file_critic):
             self.actor.load_state_dict(torch.load(file_actor))
             self.critic.load_state_dict(torch.load(file_critic))
@@ -436,13 +436,13 @@ class DDPG_HER(DDPG):
             self.num_critic_update_iteration += 1
 
 
-    def save(self, agent_type):
-        torch.save(self.actor.state_dict(), pdata.DIRECTORY + agent_type + '_actor_HER'+ self.veer + '.pth')
-        torch.save(self.critic.state_dict(), pdata.DIRECTORY + agent_type + '_critic_HER'+ self.veer + '.pth')
+    def save(self, mark_str):
+        torch.save(self.actor.state_dict(), pdata.DIRECTORY + mark_str + '_actor_HER.pth')
+        torch.save(self.critic.state_dict(), pdata.DIRECTORY + mark_str + '_critic_HER.pth')
 
-    def load(self, agent_type):
-        file_actor = pdata.DIRECTORY +  agent_type + '_actor_HER'+ self.veer + '.pth'
-        file_critic = pdata.DIRECTORY +  agent_type + '_critic_HER'+ self.veer + '.pth'
+    def load(self, mark_str):
+        file_actor = pdata.DIRECTORY +  mark_str + '_actor_HER.pth'
+        file_critic = pdata.DIRECTORY +  mark_str + '_critic_HER.pth'
         if os.path.exists(file_actor) and os.path.exists(file_critic):
             self.actor.load_state_dict(torch.load(file_actor))
             self.critic.load_state_dict(torch.load(file_critic))
@@ -544,13 +544,13 @@ class DDPG_PE(object):
             self.num_critic_update_iteration += 1
 
 
-    def save(self, agent_type):
-        torch.save(self.actor.state_dict(), pdata.DIRECTORY + agent_type + '_actor.pth')
-        torch.save(self.critic.state_dict(), pdata.DIRECTORY +  agent_type + '_critic.pth')
+    def save(self, mark_str):
+        torch.save(self.actor.state_dict(), pdata.DIRECTORY + mark_str + '_actor.pth')
+        torch.save(self.critic.state_dict(), pdata.DIRECTORY +  mark_str + '_critic.pth')
 
-    def load(self, agent_type):
-        file_actor = pdata.DIRECTORY +  agent_type + '_actor.pth'
-        file_critic = pdata.DIRECTORY +  agent_type + '_critic.pth'
+    def load(self, mark_str):
+        file_actor = pdata.DIRECTORY +  mark_str + '_actor.pth'
+        file_critic = pdata.DIRECTORY +  mark_str + '_critic.pth'
         if os.path.exists(file_actor) and os.path.exists(file_critic):
             self.actor.load_state_dict(torch.load(file_actor))
             self.critic.load_state_dict(torch.load(file_critic))
@@ -652,13 +652,13 @@ class DDPG_PE_HER(object):
             self.num_critic_update_iteration += 1
 
 
-    def save(self, agent_type):
-        torch.save(self.actor.state_dict(), pdata.DIRECTORY + agent_type + '_actor_HER.pth')
-        torch.save(self.critic.state_dict(), pdata.DIRECTORY +  agent_type + '_critic_HER.pth')
+    def save(self, mark_str):
+        torch.save(self.actor.state_dict(), pdata.DIRECTORY + mark_str + '_actor_HER.pth')
+        torch.save(self.critic.state_dict(), pdata.DIRECTORY +  mark_str + '_critic_HER.pth')
 
-    def load(self, agent_type):
-        file_actor = pdata.DIRECTORY +  agent_type + '_actor_HER.pth'
-        file_critic = pdata.DIRECTORY +  agent_type + '_critic_HER.pth'
+    def load(self, mark_str):
+        file_actor = pdata.DIRECTORY +  mark_str + '_actor_HER.pth'
+        file_critic = pdata.DIRECTORY +  mark_str + '_critic_HER.pth'
         if os.path.exists(file_actor) and os.path.exists(file_critic):
             self.actor.load_state_dict(torch.load(file_actor))
             self.critic.load_state_dict(torch.load(file_critic))

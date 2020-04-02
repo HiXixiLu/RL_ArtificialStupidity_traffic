@@ -1,7 +1,9 @@
 from itertools import count
 import os, sys, random, time  
-sys.path.append(os.getcwd() + '/traffic_model/RL_models')     # 在sys.path里动态添加了路径后，python才能找到项目中的模块
-import threading
+# 在sys.path里动态添加了路径后，python才能找到项目中的模块
+# 坑：在linux里使用 python 命令运行该.py 时，os.getcwd() 会随着用户当前所处的目录位置改变
+sys.path.append(os.getcwd() + '/traffic_model/RL_models') 
+import multiprocessing,threading
 import json
 import numpy as np
 import torch
@@ -16,17 +18,20 @@ min_Val = torch.tensor(1e-7).float().to(device) # min value : .to(device) 表示
 
 
 # 这里实现的是HER的 future 模式
-class motor_train_thread_HER(threading.Thread):
-    def __init__(self, origin_idx, veer_idx, vehicle_str):
+# class motor_train_process_HER(multiprocessing.Process):
+class motor_train_process_HER(threading.Thread):
+    def __init__(self, origin_idx, veer_idx, agent_idx):
         super().__init__()
+        # self.daemon = True
         self._origin_idx = origin_idx
         self._veer_idx = veer_idx
-        self.logger = log_util.logWriter(vehicle_str+'_HER')
+        mark_str = pdata.AGENT_TUPLE[agent_idx] + '_' + pdata.DIRECTION_TUPLE[origin_idx]+'_'+pdata.VEER_TUPLE[veer_idx]
+        self.logger = log_util.logWriter(mark_str+'_HER')
         self.roads = env.TrainingEnvironment(self.logger)
 
-        if vehicle_str == pdata.AGENT_TUPLE[0]:
+        if agent_idx == 0:
             self.agent = motorVehicle(self.logger)
-        elif vehicle_str == pdata.AGENT_TUPLE[1]:
+        elif agent_idx == 1:
             self.agent = Bicycle(self.logger)
         # elif vehicle_str == pdata.AGENT_TUPLE[2]:
         #     self.agent == pedestrian()
@@ -85,17 +90,20 @@ class motor_train_thread_HER(threading.Thread):
                     self.agent.update_model()
 
 
-class motor_train_thread(threading.Thread):
-    def __init__(self, origin_idx, veer_idx, vehicle_str):
+# class motor_train_process(multiprocessing.Process):
+class motor_train_process(threading.Thread):
+    def __init__(self, origin_idx, veer_idx, agent_idx):
         super().__init__()
+        # self.daemon = True
         self._origin_idx = origin_idx
         self._veer_idx = veer_idx
-        self.logger = log_util.logWriter(vehicle_str)
+        mark_str = pdata.AGENT_TUPLE[agent_idx] + '_' + pdata.DIRECTION_TUPLE[origin_idx]+'_'+pdata.VEER_TUPLE[veer_idx]
+        self.logger = log_util.logWriter(mark_str)
         self.roads = env.TrainingEnvironment(self.logger)
 
-        if vehicle_str == pdata.AGENT_TUPLE[0]:
+        if agent_idx == 0:
             self.agent = motorVehicle(self.logger)
-        elif vehicle_str == pdata.AGENT_TUPLE[1]:
+        elif agent_idx == 1:
             self.agent = Bicycle(self.logger)
         # elif vehicle_str == pdata.AGENT_TUPLE[2]:
         #     self.agent == pedestrian()
@@ -150,13 +158,20 @@ class motor_train_thread(threading.Thread):
 
 if __name__ == '__main__':
     # 初始化数据
-    print('main thread start')
-    thread = motor_train_thread(0, 0, 'motor')
-    thread_her = motor_train_thread_HER(0, 0, 'motor')
+    print('parent process start')
+    p_straight = motor_train_process(0, 0, 0)  # 自西往东
+    # p_left_1 = motor_train_process(2,1,0)  # 自东往南
+    # p_left_2 = motor_train_process(3,1,0) # 自北往东
+    p_straight_her = motor_train_process_HER(0, 0, 0) #自西往东
 
-    thread.start()
-    thread_her.start()
-    thread.join()
-    thread_her.join()
+    p_straight.start()
+    # p_left_1.start()
+    # p_left_2.start()
+    p_straight_her.start()
 
-    print('main thread ends.')
+    p_straight.join()
+    # p_left_1.join()
+    # p_left_2.join()
+    p_straight_her.join()
+    print('parent process ends.')
+
