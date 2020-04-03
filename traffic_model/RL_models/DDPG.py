@@ -307,7 +307,8 @@ class DDPG(object):
             # torch.nn.functional.mse_loss 为计算tensor中各个元素的的均值方差
             critic_loss = F.mse_loss(current_Q, target_Q) 
             # self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
-            self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
+            # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
+            self.logger.add_to_critic_buffer(critic_loss.item())
 
             # Optimize the critic
             self.critic_optimizer.zero_grad()   # zeros the gradient buffer
@@ -320,7 +321,8 @@ class DDPG(object):
             # backward() 以梯度下降的方式更新参数，则将 actor_loss 设置为反向梯度，这样参数便往梯度上升方向更新
             actor_loss = -self.critic(state, self.actor(state)).mean()  
             # self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
-            self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
+            # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
+            self.logger.add_to_actor_buffer(actor_loss.item())
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()    # Clears the gradients of all optimized torch.Tensor
@@ -348,8 +350,8 @@ class DDPG(object):
         if os.path.exists(file_actor) and os.path.exists(file_critic):
             self.actor.load_state_dict(torch.load(file_actor))
             self.critic.load_state_dict(torch.load(file_critic))
-        else:
-            self.logger.write_to_log(".pth doesn't exist. Use default parameters")
+        # else:
+            # self.logger.write_to_log(".pth doesn't exist. Use default parameters")
 
 
 
@@ -410,7 +412,8 @@ class DDPG_HER(DDPG):
 
             current_Q = self.critic(state, action)
             critic_loss = F.mse_loss(current_Q, target_Q) 
-            self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
+            # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
+            self.logger.add_to_critic_buffer(critic_loss.item())
 
             # Optimize the critic
             self.critic_optimizer.zero_grad()   # zeros the gradient buffer
@@ -418,7 +421,8 @@ class DDPG_HER(DDPG):
             self.critic_optimizer.step()
 
             actor_loss = -self.critic(state, self.actor(state)).mean()  
-            self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
+            # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
+            self.logger.add_to_actor_buffer(actor_loss.item())
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()    # Clears the gradients of all optimized torch.Tensor
@@ -446,8 +450,8 @@ class DDPG_HER(DDPG):
         if os.path.exists(file_actor) and os.path.exists(file_critic):
             self.actor.load_state_dict(torch.load(file_actor))
             self.critic.load_state_dict(torch.load(file_critic))
-        else:
-            self.logger.write_to_log(".pth doesn't exist. Use default parameters")
+        # else:
+        #     self.logger.write_to_log(".pth doesn't exist. Use default parameters")
 
 
 class DDPG_PE(object):
@@ -513,7 +517,8 @@ class DDPG_PE(object):
             # torch.nn.functional.mse_loss 为计算tensor中各个元素的的均值方差
             critic_loss = F.mse_loss(current_Q, target_Q) 
             # self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
-            self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
+            # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
+            self.logger.add_to_critic_buffer(critic_loss.item())
 
             # Optimize the critic
             self.critic_optimizer.zero_grad()   # zeros the gradient buffer
@@ -526,7 +531,8 @@ class DDPG_PE(object):
             # backward() 以梯度下降的方式更新参数，则将 actor_loss 设置为反向梯度，这样参数便往梯度上升方向更新
             actor_loss = -self.critic(state, self.actor(state)).mean()  
             # self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
-            self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
+            # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
+            self.logger.add_to_actor_buffer(actor_loss.item())
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()    # Clears the gradients of all optimized torch.Tensor
@@ -554,8 +560,8 @@ class DDPG_PE(object):
         if os.path.exists(file_actor) and os.path.exists(file_critic):
             self.actor.load_state_dict(torch.load(file_actor))
             self.critic.load_state_dict(torch.load(file_critic))
-        else:
-            self.logger.write_to_log(".pth doesn't exist. Use default parameters")
+        # else:
+        #     self.logger.write_to_log(".pth doesn't exist. Use default parameters")
 
 
 class DDPG_PE_HER(object):
@@ -621,7 +627,8 @@ class DDPG_PE_HER(object):
             # torch.nn.functional.mse_loss 为计算tensor中各个元素的的均值方差
             critic_loss = F.mse_loss(current_Q, target_Q) 
             # self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
-            self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
+            # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
+            self.logger.add_to_critic_buffer(critic_loss.item())
 
             # Optimize the critic
             self.critic_optimizer.zero_grad()   # zeros the gradient buffer
@@ -634,7 +641,8 @@ class DDPG_PE_HER(object):
             # backward() 以梯度下降的方式更新参数，则将 actor_loss 设置为反向梯度，这样参数便往梯度上升方向更新
             actor_loss = -self.critic(state, self.actor(state)).mean()  
             # self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
-            self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
+            # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
+            self.logger.add_to_actor_buffer(actor_loss.item())
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()    # Clears the gradients of all optimized torch.Tensor
@@ -662,5 +670,5 @@ class DDPG_PE_HER(object):
         if os.path.exists(file_actor) and os.path.exists(file_critic):
             self.actor.load_state_dict(torch.load(file_actor))
             self.critic.load_state_dict(torch.load(file_critic))
-        else:
-            self.logger.write_to_log(".pth doesn't exist. Use default parameters")
+        # else:
+        #     self.logger.write_to_log(".pth doesn't exist. Use default parameters")

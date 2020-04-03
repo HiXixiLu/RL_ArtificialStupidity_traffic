@@ -4,6 +4,7 @@ import copy
 import numpy as np 
 from numpy import linalg as la
 import public_data as pdata
+import geometry as geo
 from RL_models.vehicle import motorVehicle, Bicycle, vehicle
 import pedestrian as pe
 
@@ -188,15 +189,12 @@ class TrainingEnvironment():
             seg = np.array([[-pdata.LANE_W, pdata.LANE_W], [-pdata.LANE_L - pdata.LANE_W, pdata.LANE_W]])
             self.edges.append(seg)
 
-        print("Environment initiation's done.")
-
 
     def __del__(self):
         self.vehicle_set.clear()
         del self.vehicle_set
         self.pedestrian_set.clear()
         del self.pedestrian_set
-        print("Diconstruction's done")
 
 
     def step(self, agent, action):
@@ -410,7 +408,7 @@ class TrainingEnvironment():
 
         # 计算以segment为横轴的坐标系的非平移的基在原点坐标系中的表示
         u_b_x = (seg_copy[1] - seg_copy[0]) / la.norm((seg_copy[1] - seg_copy[0]))  # u_x, u_y: 由线段确定的坐标系在原点坐标系中的基
-        u_b_y = np.matmul(self.rotate90_mat, u_b_x)
+        u_b_y = np.matmul(geo.rotate90_mat, u_b_x)
         base_b = np.array([u_b_x, u_b_y])  # 基底
         base_b_reverse = la.inv(base_b)
 
@@ -468,7 +466,7 @@ class TrainingEnvironment():
         # 主线奖励：进入目的地、进入与目的地不符的区域、发生车辆行人碰撞，都会采用主线奖励
         if self._check_agent_collision(agent):
             reward = -pdata.MAIN_REWARD
-            self.logger.write_to_log('<agent collided>')
+            # self.logger.write_to_log('\n<agent collided>\n')
             return reward
         # elif not self._check_bound(agent):  # 包括越出仿真区域、开到左车道都会直接终止
         #     reward = -5000
@@ -476,11 +474,11 @@ class TrainingEnvironment():
         #     return reward
         elif self._check_arrival(agent):
             reward = pdata.MAIN_REWARD
-            self.logger.write_to_log('<agent arrived>')
+            # self.logger.write_to_log('\n<agent arrived>\n')
             return reward
         elif self._check_outside_region(agent):
             reward = -pdata.MAIN_REWARD
-            self.logger.write_to_log('<agent out>')
+            # self.logger.write_to_log('\n<agent out>\n')
             return reward
 
         # 接近奖励 —— 允许的最大速度的模也仅仅只有 0.69 m/frame
@@ -520,7 +518,7 @@ class TrainingEnvironment():
 
         reward = _r_d + _r_v + _r_lane_change
         # print('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity), file = pdata.EXPERIMENT_LOG)
-        self.logger.write_to_log('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
+        # self.logger.write_to_log('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
         return reward 
 
 
@@ -554,7 +552,7 @@ class TrainingEnvironment():
                 _r_v = 0          
 
             reward  =_r_d + _r_lane_change + _r_v
-            self.logger.write_to_log('reward_her: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
+            # self.logger.write_to_log('reward_her: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
         return reward
 
 
@@ -757,7 +755,7 @@ class TrainingEnvironment():
     # 环境的 reset —— 重置单个agent
     def reset(self,agent):
         # print('\n -----------agent reset---------- \n')
-        self.logger.write_to_log('\n -----------agent reset---------- \n')
+        # self.logger.write_to_log('\n -----------agent reset---------- \n')
         agent.reset_agent()
         return self._get_state_feature(agent)
 

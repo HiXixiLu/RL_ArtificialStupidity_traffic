@@ -38,7 +38,7 @@ TARGET_UPDATE_INTERVAL = 1
 TEST_ITERATION = 10
 LEARNING_RATE = 1e-3     # 0.001的学习率
 GAMMA = 0.99    # discounted factor
-CAPACITY = 30000    # replay buffer size
+CAPACITY = 50000   # replay buffer size
 BATCH_SIZE = 64  # minimun batch size
 SEED = False
 RANDOM_SEED = 9527
@@ -51,7 +51,7 @@ RENDER_INTERVAL = 100
 EXPLORATION_NOISE = 0.3     # 探索率
 ANGLE_SD = (EXPLORATION_NOISE * np.pi/2) / 2.576     # 正态分布的标准差σ：满足 X~N(0, σ^2) 使上α分位点在 0.2 * np.pi/2 上，其中α=0.005
 NORM_SD = MAX_ACCELERATION / 2.576  # 正态分布的标准差σ：满足 X~N(0, σ^2) 使上α分位点在 0.2 * MAX_ACCELERATION，其中α=0.005
-MAX_EPISODE = 35000    # num of games —— 进行实验的次数，也即Montecarlo序列的采集数
+MAX_EPISODE = 58000    # num of games —— 进行实验的次数，也即Montecarlo序列的采集数
 MAX_LENGTH_OF_TRAJECTORY = 500     # num of frames —— 单次训练最大序列长度
 PRINT_LOG = 5
 UPDATE_ITERATION = 10   # 一次网络参数更新的均值计算次数

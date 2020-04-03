@@ -43,7 +43,7 @@ class motor_train_process_HER(threading.Thread):
 
         # 收集训练数据
         if pdata.MODE == 'train':
-            self.logger.record_start_time()
+            # self.logger.record_start_time()
             if pdata.LOAD: 
                 self.agent.load()     # 决定了是否导入已有的模型
 
@@ -79,15 +79,17 @@ class motor_train_process_HER(threading.Thread):
                     state = next_state
                     if done or t >= pdata.MAX_LENGTH_OF_TRAJECTORY:
                         break
+                self.logger.add_to_position_seq()
 
                 if i % pdata.LOG_INTERVAL== 0:
-                    print('motor_thread_HER saves parameters.') # breathing messages
+                    # print('motor_thread_HER saves parameters.') # breathing messages
                     self.agent.save()
 
                 # 样本池满了之后每轮迭代都在更新模型
                 if len(self.agent.get_buffer_storage()) >= pdata.CAPACITY - 1:
-                    self.logger.write_to_log('HER params update!\n')
+                    # self.logger.write_to_log('HER params update!\n')
                     self.agent.update_model()
+        self.logger.record()
 
 
 # class motor_train_process(multiprocessing.Process):
@@ -115,7 +117,7 @@ class motor_train_process(threading.Thread):
         
         # 收集训练数据
         if pdata.MODE == 'train':
-            self.logger.record_start_time()
+            # self.logger.record_start_time()
             if pdata.LOAD: 
                 self.agent.load()     # 决定了是否导入已有的模型
 
@@ -145,6 +147,7 @@ class motor_train_process(threading.Thread):
                     state = next_state
                     if done or t >= pdata.MAX_LENGTH_OF_TRAJECTORY:
                         break
+                self.logger.add_to_position_seq()
 
                 if i % pdata.LOG_INTERVAL== 0:
                     print('motor_thread saves parameters.')
@@ -152,26 +155,27 @@ class motor_train_process(threading.Thread):
 
                 # 样本池满了之后每轮迭代都在更新模型
                 if len(self.agent.get_buffer_storage()) >= pdata.CAPACITY - 1:
-                    self.logger.write_to_log('params update!\n')
+                    # self.logger.write_to_log('params update!\n')
                     self.agent.update_model()  # 更新
+        self.logger.record()   
 
 
 if __name__ == '__main__':
     # 初始化数据
     print('parent process start')
-    p_straight = motor_train_process(0, 0, 0)  # 自西往东
-    # p_left_1 = motor_train_process(2,1,0)  # 自东往南
-    # p_left_2 = motor_train_process(3,1,0) # 自北往东
-    p_straight_her = motor_train_process_HER(0, 0, 0) #自西往东
+    # p_straight = motor_train_process(0, 0, 0)  # 自西往东
+    p_left_1 = motor_train_process(2,1,0)  # 自东往南
+    p_left_2 = motor_train_process(3,1,0) # 自北往东
+    # p_straight_her = motor_train_process_HER(0, 0, 0) #自西往东
 
-    p_straight.start()
-    # p_left_1.start()
-    # p_left_2.start()
-    p_straight_her.start()
+    # p_straight.start()
+    p_left_1.start()
+    p_left_2.start()
+    # p_straight_her.start()
 
-    p_straight.join()
-    # p_left_1.join()
-    # p_left_2.join()
-    p_straight_her.join()
+    # p_straight.join()
+    p_left_1.join()
+    p_left_2.join()
+    # p_straight_her.join()
     print('parent process ends.')
 

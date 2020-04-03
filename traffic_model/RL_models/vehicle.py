@@ -76,7 +76,7 @@ class vehicle(object):
     def set_origin(self, origin):
         if not isinstance(origin, str):
             # print("set_origin function argument require an instance of class 'str' !")
-            self.logger.write_to_log("set_origin function argument require an instance of class 'str' !")
+            # self.logger.write_to_log("set_origin function argument require an instance of class 'str' !")
             return
 
         if origin == 'east':
@@ -97,9 +97,10 @@ class vehicle(object):
             self._velocity = origin_v_south
 
         self._origin_v = copy.deepcopy(self._velocity)
-        log_str = 'agent initialtion: origin - {og}  position - {pos}  velocity - {v}m/frame'.format(v = self._velocity, og = self._origin, pos = self._position)
+        self.logger.record_position(self._position)
+        # log_str = 'agent initialtion: origin - {og}  position - {pos}  velocity - {v}m/frame'.format(v = self._velocity, og = self._origin, pos = self._position)
         # print(log_str)
-        self.logger.write_to_log(log_str)
+        # self.logger.write_to_log(log_str)
 
 
     # 设置 agent 的转向 —— 这是为了让 agent 的运动与具体地形解耦
@@ -160,7 +161,7 @@ class vehicle(object):
 
         self._destination_world = destination[0:2]    # 丢弃坐标运算添加的最后一个元素
         # print('destination position: {des}'.format(des = self._destination))
-        self.logger.write_to_log('destination position in world: {des}'.format(des = self._destination_world))
+        # self.logger.write_to_log('destination position in local: {des}'.format(des = self._destination_local))
 
 
     def set_rays(self):
@@ -333,9 +334,10 @@ class vehicle(object):
         pos_next = self._position + v_next 
         self._last_position = copy.deepcopy(self._position)
         self._position = pos_next
-        tmp_str = 'Agent Position: {pos}, Velocity Norm:{norm}'.format(pos = self._position, norm=la.norm(self._velocity))
+        self.logger.record_position(self._position)
+        # tmp_str = 'Agent Position: {pos}, Velocity Norm:{norm}'.format(pos = self._position, norm=la.norm(self._velocity))
         # print(tmp_str)
-        self.logger.write_to_log(tmp_str)
+        # self.logger.write_to_log(tmp_str)
         self._vertice_in_world = self.calculate_vertice(pos_next, v_next)
         self._update_destination_local()
         self.update_rays()
@@ -371,12 +373,12 @@ class vehicle(object):
 
     # 载入和保存模型参数的方式
     def load(self):
-        self.logger.write_to_log('.pth to be loaded...')
+        # self.logger.write_to_log('.pth to be loaded...')
         self.model.load('')
 
 
     def save(self):
-        self.logger.write_to_log('.pth to be saved...')
+        # self.logger.write_to_log('.pth to be saved...')
         self.model.save('')
 
 
@@ -406,11 +408,11 @@ class motorVehicle(vehicle):
         self._length = pdata.MOTER_L
 
     def save(self):
-        self.logger.write_to_log('Motor : .pth to be saved...')
+        # self.logger.write_to_log('Motor : .pth to be saved...')
         self.model.save(pdata.AGENT_TUPLE[0]+'_'+self._origin+'_'+self._veer)
 
     def load(self):
-        self.logger.write_to_log('Motor: .pth to be loaded...')
+        # self.logger.write_to_log('Motor: .pth to be loaded...')
         self.model.load(pdata.AGENT_TUPLE[0]+'_'+self._origin+'_'+self._veer)
 
 
@@ -425,11 +427,11 @@ class Bicycle(vehicle):
         self._length = pdata.NON_MOTOR_L
 
     def save(self):
-        self.logger.write_to_log('Bicycle: .pth to be saved...')
+        # self.logger.write_to_log('Bicycle: .pth to be saved...')
         self.model.save(pdata.AGENT_TUPLE[1]+'_'+self._origin+'_'+self._veer)
 
     def load(self):
-        self.logger.write_to_log('Bicycle: .pth to be loaded...')
+        # self.logger.write_to_log('Bicycle: .pth to be loaded...')
         self.model.load(pdata.AGENT_TUPLE[1]+'_'+self._origin+'_'+self._veer) 
 
         
