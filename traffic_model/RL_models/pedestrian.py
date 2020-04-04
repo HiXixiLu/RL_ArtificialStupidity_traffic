@@ -26,6 +26,7 @@ class pedestrian():
         [-pdata.P_L/2, -pdata.P_W/2]])   # 记录四个顶点的局部坐标系，一旦初始化就不变更
         self._vertice_in_world = np.zeros((4, 2))   # 记录的是四个顶点在世界坐标系下的坐标
         self._origin_pos = np.zeros((2,2))       # 记录行人的出发点
+        self._velocity = np.ones((2,2))
         self.model = None       # 用于保存 DDPG 相关的类对象
         self._width = pdata.P_W
         self._length = pdata.P_L
@@ -109,6 +110,7 @@ class pedestrian():
 
         self._edge = edge
         self._distance = distance
+        self._velocity = copy.deepcopy(self._origin_v)
 
 
     def set_rays(self):
@@ -206,11 +208,13 @@ class pedestrian():
         else:
             self._velocity = copy.deepcopy(v)
 
+    def get_modify_ratio(self, vel):
+        return pdata.MAX_HUMAN_VEL / (la.norm(vel) + pdata.EPSILON)
 
     # 特殊地，允许行人往回跑
     def update_attr(self, vel):
         v_next = vel + self._velocity
-        ratio = pdata.MAX_HUMAN_VEL / la.norm(v_next)
+        ratio = self.get_modify_ratio(v_next)
         if ratio < 1:
             v_next = ratio * v_next
 
@@ -218,18 +222,19 @@ class pedestrian():
         pos_next = self._position + v_next 
         self._last_position = copy.deepcopy(self._position)
         self._set_position(pos_next)
-        tmp_str = 'Agent Position: {pos}'.format(pos = self._position)
-        self.logger.write_to_log(tmp_str)
+        # tmp_str = 'Agent Position: {pos}'.format(pos = self._position)
+        # self.logger.write_to_log(tmp_str)
+        self.logger.record_position(self._position)
 
 
     # 载入和保存模型参数的方式
     def load(self):
-        self.logger.write_to_log('.pth to be loaded...')
+        # self.logger.write_to_log('.pth to be loaded...')
         self.model.load(pdata.AGENT_TUPLE[2])
 
 
     def save(self):
-        self.logger.write_to_log('.pth to be saved...')
+        # self.logger.write_to_log('.pth to be saved...')
         self.model.save(pdata.AGENT_TUPLE[2])
 
 

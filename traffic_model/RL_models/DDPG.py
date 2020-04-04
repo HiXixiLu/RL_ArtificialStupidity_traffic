@@ -139,40 +139,38 @@ class ActorHER(nn.Module):
 
 
 class ActorPedestrian(nn.Module):
-    def __init__(self, state_dim, action_dim, max_velocity):
+    def __init__(self, state_dim, action_dim, max_vel):
         super(ActorPedestrian, self).__init__()
-        self.l1 = nn.Linear(state_dim, 100)
-        self.l2 = nn.Linear(100, 75)
-        self.l3 = nn.Linear(75, action_dim)
-        self.max_velocity = max_velocity
+        self.l1 = nn.Linear(state_dim, 50)
+        self.l2 = nn.Linear(50, 30)
+        self.l3 = nn.Linear(30, action_dim)
+        self.max_velocity = max_vel
 
     def forward(self, x):
         x = F.relu(self.l1(x))
         x = F.relu(self.l2(x))
         x = self.l3(x)  # 一个速度矢量
-        ratio = self.max_velocity / la.norm(x)
+        ratio = self.max_velocity / (torch.norm(x) + pdata.EPSILON)
         if ratio < 1:
-            return ratio * x
-        else:
-            return x
+            x = x * ratio
+        return x
 
 class ActorPedestrianHER(nn.Module):
-    def __init__(self, her_state_dim, action_dim, max_velocity):
+    def __init__(self, her_state_dim, action_dim, max_vel):
         super(ActorPedestrianHER, self).__init__() 
-        self.l1 = nn.Linear(her_state_dim, 100) # env_state + pos_goal 的拼接维度
-        self.l2 = nn.Linear(100, 75)
-        self.l3 = nn.Linear(75, action_dim)
-        self.max_velocity = max_velocity 
+        self.l1 = nn.Linear(her_state_dim, 50) # env_state + pos_goal 的拼接维度
+        self.l2 = nn.Linear(50, 30)
+        self.l3 = nn.Linear(30, action_dim)
+        self.max_velocity = max_vel
 
     def forward(self, x):
         x = F.relu(self.l1(x))
         x = F.relu(self.l2(x))
         x = self.l3(x)  # 一个速度矢量
-        ratio = self.max_velocity / la.norm(x)
+        ratio = self.max_velocity / (torch.norm(x) + pdata.EPSILON)
         if ratio < 1:
-            return ratio * x
-        else:
-            return x
+            x = x * ratio
+        return x
 
 
 # 评价器 ：作用就是输出 Q(s, a) 的估计
@@ -212,9 +210,9 @@ class CriticHER(nn.Module):
 class CriticPedestrian(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(CriticPedestrian, self).__init__()
-        self.l1 = nn.Linear(her_state_dim + action_dim, 100)    # 输入是 state，position 和 action 的重组向量
-        self.l2 = nn.Linear(100, 75)
-        self.l3 = nn.Linear(75, 1)
+        self.l1 = nn.Linear(state_dim + action_dim, 50)    # 输入是 state，position 和 action 的重组向量
+        self.l2 = nn.Linear(50, 30)
+        self.l3 = nn.Linear(30, 1)
 
     def forward(self, x, u):
         x = F.relu(self.l1(torch.cat((x, u),1)))  # x: state||goal , u: action
@@ -226,9 +224,9 @@ class CriticPedestrian(nn.Module):
 class CriticPedestrianHER(nn.Module):
     def __init__(self, her_state_dim, action_dim):
         super(CriticPedestrianHER, self).__init__()
-        self.l1 = nn.Linear(her_state_dim + action_dim, 100)
-        self.l2 = nn.Linear(100, 75)
-        self.l3 = nn.Linear(75, 1)
+        self.l1 = nn.Linear(her_state_dim + action_dim, 50)
+        self.l2 = nn.Linear(50, 30)
+        self.l3 = nn.Linear(30, 1)
 
     def forward(self, x, u):
         x = F.relu(self.l1(torch.cat((x, u),1)))  # torch.cat() 只能 concatenate 相同 shape 的 tensor
@@ -296,11 +294,11 @@ class DDPG(object):
             # 这里的 target_Q 是 sample 个 一维tensor
             target_Q = self.critic_target(next_state, self.actor_target(next_state))
             # detach(): Return a new tensor, detached from the current graph
-            # soft update of target_Q
-            target_Q = reward + ((1 - done) * pdata.GAMMA * target_Q).detach() 
+            # evaluate Q: targetQ = R + γQ'(s', a')
+            target_Q = reward + ((1 - done) * pdata.GAMMA * target_Q).detach()  # batch_size个维度
 
             # Get current Q estimate
-            current_Q = self.critic(state, action)
+            current_Q = self.critic(state, action)  # 1 维 
 
             # Compute critic loss : a mean-square error
             # 由论文，critic_loss 其实计算的是每个样本估计值与每个critic网络输出的均值方差

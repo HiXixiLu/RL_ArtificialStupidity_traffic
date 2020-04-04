@@ -296,7 +296,7 @@ class vehicle(object):
             self._destination = des
 
 
-    # 由加速度计算下一步长的速度 —— 2020-3-26：从物理模型本身防止开倒车
+    # 由加速度计算下一步长的速度 —— 2020-4-3：动作向量的两个维度分别作用
     def get_updated_velocity(self, ac):
         if not self.check_2darray(ac):
             return np.array([])
@@ -304,21 +304,24 @@ class vehicle(object):
             v_t_ab = la.norm(self._velocity)
             v_cos = self._velocity[0] / (v_t_ab + pdata.EPSILON)
             v_sin = self._velocity[1] / (v_t_ab + pdata.EPSILON)
-
             ac_sin = np.sin(ac[0])
             ac_cos = np.cos(ac[0])
-            # self.crap_acceleration(ac)
-            v_delta = np.array([ac_cos*v_cos - ac_sin*v_sin , ac_sin*v_cos + ac_cos*v_sin]) * ac[1]
-            v_next = v_delta + self._velocity
-        # 防开倒车
-        cosv_next = v_next.dot(self._velocity) / (la.norm(v_next) * la.norm(self._velocity) + pdata.EPSILON)
-        if cosv_next <= 0:
-            return copy.deepcopy(pdata.EPSILON * self._velocity)
-        # 极限速度修正
-        ratio = pdata.MAX_VELOCITY / (la.norm(v_next) + pdata.EPSILON)
-        if ratio < 1:
-            v_next = ratio * v_next
+            v_next = np.array([v_cos * ac_cos - v_sin * ac_sin, v_cos * ac_sin + v_sin * ac_cos])
+            v_next_ab = v_t_ab + ac[1]
+            
+        if v_next_ab <= 0.0:
+            # 防开倒车
+            v_next_ab = pdata.EPSILON
+        elif v_next_ab >= self._get_max_velocity():
+            # 极限速度修正
+            v_next_ab = self._get_max_velocity()
+        
+        v_next = v_next * v_next_ab
         return v_next
+
+
+    def _get_max_velocity(self):
+        return pdata.MAX_VELOCITY
 
 
     # 由加速度更新 Agent 的属性
@@ -425,6 +428,9 @@ class Bicycle(vehicle):
         [-pdata.NON_MOTOR_L/2, -pdata.NON_MOTOR_W/2]])
         self._width = pdata.NON_MOTOR_W
         self._length = pdata.NON_MOTOR_L
+
+    def get_max_velocity(self, vel):
+        return pdata.MAX_BICYCLE_VEL
 
     def save(self):
         # self.logger.write_to_log('Bicycle: .pth to be saved...')

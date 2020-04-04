@@ -64,6 +64,36 @@ class logWriter():
             txt_file.write(ss)
         txt_file.close()
 
+    def record_pe(self):
+        # 参数文件
+        txt_file = open(DIRECTORY + self._file_name +'_params.txt', 'w')
+        txt_file.write('--------------START TIME: '+ self.START_TIME + '---------------------')
+        txt_file.write('\n===============  initialization parameters  ===============\n')
+        txt_file.write('\nexperiment: episodes = {e}, len_of_trajectory = {lt}, gamma = {g}, learning_rate = {lr}, exploration_rate = {er},\nbuffer_size = {bs}, batch_size = {bs1}'.format(
+            e = pdata.MAX_EPISODE, lt = pdata.MAX_LENGTH_OF_TRAJECTORY, g = pdata.GAMMA, lr = pdata.LEARNING_RATE, er = pdata.EXPLORATION_NOISE, bs = pdata.CAPACITY, bs1 = pdata.BATCH_SIZE
+        ))
+        txt_file.write('\nenvironment limits : max_velocity = {mv} m/frame, fps = {fps} frames/s'.format(
+            mv = pdata.MAX_HUMAN_VEL, fps = pdata.FPS
+        ))
+        txt_file.write('\n===========================================================')
+        txt_file.write('\n--------------END TIME: '+ time.strftime("%m-%d_%H-%M", time.localtime(time.time())) + '---------------------')
+        txt_file.close()
+
+        # loss表格
+        data_frame = pandas.DataFrame({'critic_loss':self._critic_loss, 'actor_loss':self._actor_loss})
+        data_frame.to_csv(DIRECTORY + self._file_name + '_loss.csv', index=False)   # 有一个seq参数，如果不指定，则默认分割符为','
+
+        # 路径点序列
+        txt_file = open(DIRECTORY + self._file_name  + '_positions.txt', 'w')
+        txt_file.write('position sequences:')
+        for i in range(0, len(self._position_seq)):
+            ss = ''
+            for j in range(0, len(self._position_seq[i])):
+                ss = ss + str(self._position_seq[i][j][0]) + ',' + str(self._position_seq[i][j][1]) + ' '
+            ss = ss[:-1]
+            txt_file.write(ss)
+        txt_file.close()
+
 
     # def record_start_time(self):
     #     self.write_to_log('--------------START TIME: '+ self.START_TIME + '---------------------')

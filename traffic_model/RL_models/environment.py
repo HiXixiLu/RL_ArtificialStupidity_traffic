@@ -200,7 +200,10 @@ class TrainingEnvironment():
     def step(self, agent, action):
         self._update_environment(agent, action)
         next_state = self._get_state_feature(agent)
-        reward = self._get_reward(agent)
+        if isinstance(agent, vehicle):
+            reward = self._get_reward(agent)
+        else:
+            reward = self._get_reward_pe(agent)
         done = self._check_termination(reward)
 
         return next_state, reward, done
@@ -521,6 +524,57 @@ class TrainingEnvironment():
         # self.logger.write_to_log('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
         return reward 
 
+    def _get_reward_pe(self, agent, goal=None):
+        reward = 0
+
+        # 主线奖励：进入目的地、进入与目的地不符的区域、发生车辆行人碰撞，都会采用主线奖励
+        if self._check_agent_collision(agent):
+            reward = -pdata.MAIN_REWARD
+            # self.logger.write_to_log('\n<agent collided>\n')
+            return reward
+        elif self._check_arrival(agent):
+            reward = pdata.MAIN_REWARD
+            # self.logger.write_to_log('\n<agent arrived>\n')
+            return reward
+        elif self._check_outside_region(agent):
+            reward = -pdata.MAIN_REWARD
+            # self.logger.write_to_log('\n<agent out>\n')
+            return reward
+
+        # 接近奖励 —— 允许的最大速度的模也仅仅只有 0.69 m/frame
+        delta_d = la.norm(agent.get_last_position() - agent.get_destination_world()) - la.norm(agent.get_position() - agent.get_destination_world())
+        _r_d = 10 * delta_d
+
+        # 速度奖励
+        velocity = agent.get_velocity()
+        norm_v = la.norm(velocity)
+        if  norm_v >= pdata.MAX_HUMAN_VEL:
+            _r_v = -10 * (norm_v - pdata.MAX_HUMAN_VEL)
+        elif norm_v:
+            # cos奖励 —— 与初始速度越接近，奖励越大
+            origin_v = agent.get_origin_v()
+            cosine = origin_v.dot(velocity) / (la.norm(origin_v) * norm_v) 
+            _r_v = 10 * cosine + 10 * norm_v  
+        else:
+            _r_v = 0
+
+        # if isinstance(agent, MotorVehicle):     # 包导入路径的写法都会影响 isinstance()的准确性
+        #     print('Hello agent MotorVehicle.')
+
+        # elif isinstance(agent, NonMotorVehicle):
+        #     print('...')
+
+        # elif isinstance(agent, Pedestrian):
+        #     print('...')
+
+        # else:
+        #     print("Parameter agent has to be one of class MotorVehicle, NonMotorVehicle and Pedestrian.")
+
+        reward = _r_d + _r_v
+        # print('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity), file = pdata.EXPERIMENT_LOG)
+        # self.logger.write_to_log('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
+        return reward 
+
 
     # 除了移动目标不一致，其余与 _get_reward 相同
     def get_her_reward(self, agent, normal_reward, future_pos):
@@ -571,24 +625,12 @@ class TrainingEnvironment():
         _count = 0
 
         # 姑且采用暴力遍历方式检查相撞
-        if isinstance(agent, motorVehicle):
-            _count = len(self.vehicle_set)
-            for i in range(0, _count):
-                if agent == self.vehicle_set[i]:
-                    continue
-                elif self._check_bilateral_collision(agent, self.vehicle_set):
-                    collision = True
-            collision = False            
-
-        # elif isinstance(agent, NonMotorVehicle):
-        #     print('...')
-
-        # elif isinstance(agent, Pedestrian):
-        #     print('...')
-
-        else:
-            print("Parameter agent has to be one of class MotorVehicle, NonMotorVehicle and Pedestrian.")
-
+        _count = len(self.vehicle_set)
+        for i in range(0, _count):
+            if agent == self.vehicle_set[i]:
+                continue
+            elif self._check_bilateral_collision(agent, self.vehicle_set):
+                collision = True
         return collision
 
 

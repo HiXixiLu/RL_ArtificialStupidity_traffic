@@ -6,11 +6,13 @@ sys.path.append(os.getcwd() + '/traffic_model/RL_models')
 import multiprocessing,threading
 import json
 import numpy as np
+from numpy import linalg as la
 import torch
 from RL_models import environment as env
 from RL_models import DDPG, log_util
 from RL_models import public_data as pdata
 from RL_models.vehicle import motorVehicle, Bicycle
+from RL_models.pedestrian import pedestrian
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -150,7 +152,7 @@ class motor_train_process(threading.Thread):
                 self.logger.add_to_position_seq()
 
                 if i % pdata.LOG_INTERVAL== 0:
-                    print('motor_thread saves parameters.')
+                    # print('motor_thread saves parameters.')
                     self.agent.save()
 
                 # 样本池满了之后每轮迭代都在更新模型
@@ -160,22 +162,94 @@ class motor_train_process(threading.Thread):
         self.logger.record()   
 
 
+# class PedestrianTrainProcess(multiprocessing.Process):
+class PedestrianTrainProcess(threading.Thread):
+    def __init__(self, origin_idx, distance, agent_idx):
+        super().__init__()
+        # self.daemon = True
+        self._origin_idx = origin_idx
+        self._distance = distance
+        mark_str = pdata.AGENT_TUPLE[agent_idx] + '_' + pdata.EDGE_TUPLE[origin_idx] + '_' + str(distance)
+        self.logger = log_util.logWriter(mark_str)
+        self.roads = env.TrainingEnvironment(self.logger)
+
+        if agent_idx == 2:
+            self.agent = pedestrian(self.logger)
+
+    # 单agent的线程
+    def run(self):
+        # origin_idx: 小车的出发地   veer_idx 小车的转向
+        self.agent.initiate_agent(self._origin_idx, self._distance)    
+        
+        # 收集训练数据
+        if pdata.MODE == 'train':
+            # self.logger.record_start_time()
+            if pdata.LOAD: 
+                self.agent.load()     # 决定了是否导入已有的模型
+
+            for i in range(pdata.MAX_EPISODE):
+                state = self.roads.reset(self.agent)      # state 的维数要尤其注意
+
+                # count(): an infinite iterator provided by module itertools
+                # 用于往经验池中放入样本的内层循环
+                for t in count():
+                    action = self.agent.select_action(state)
+
+                    # add noise to action 
+                    noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_SD)])
+                    action = action + noise
+                    ratio = pdata.MAX_HUMAN_VEL / (la.norm(self.agent.get_velocity()) + pdata.EPSILON)
+                    if ratio < 1:
+                        action = ratio * action 
+                    next_state, reward, done = self.roads.step(self.agent, action)
+                    # if pdata.RENDER and i >= pdata.RENDER_INTERVAL: roads.render()
+
+                    # the five-element tuple of a sample
+                    # 往经验池里增加序列元素
+                    self.agent.add_to_replaybuffer(state, next_state, action, reward, np.float(done))    # np.float(done)保存入元组是为了用于update计算中的数值转换
+
+                    state = next_state
+                    if done or t >= pdata.MAX_LENGTH_OF_TRAJECTORY:
+                        break
+                self.logger.add_to_position_seq()
+
+                if i % pdata.LOG_INTERVAL== 0:
+                    # print('motor_thread saves parameters.')
+                    self.agent.save()
+
+                # 样本池满了之后每轮迭代都在更新模型
+                if len(self.agent.get_buffer_storage()) >= pdata.CAPACITY - 1:
+                    # self.logger.write_to_log('params update!\n')
+                    self.agent.update_model()  # 更新
+        self.logger.record_pe()  
+
+
+
 if __name__ == '__main__':
     # 初始化数据
     print('parent process start')
     # p_straight = motor_train_process(0, 0, 0)  # 自西往东
-    p_left_1 = motor_train_process(2,1,0)  # 自东往南
-    p_left_2 = motor_train_process(3,1,0) # 自北往东
+    # p_left_1 = motor_train_process(2,1,0)  # 自东往南
+    # p_left_2 = motor_train_process(3,1,0) # 自北往东
+    p_bi_left_1 = motor_train_process(2,1,1)
+    p_bi_left_2 = motor_train_process(3,1,1)
     # p_straight_her = motor_train_process_HER(0, 0, 0) #自西往东
+    # p_pe_ver_left_down = PedestrianTrainProcess(1, 2.0, 2) #南部路口通行
 
     # p_straight.start()
-    p_left_1.start()
-    p_left_2.start()
+    # p_left_1.start()
+    # p_left_2.start()
+    p_bi_left_1.start()
+    p_bi_left_2.start()
     # p_straight_her.start()
+    # p_pe_ver_left_down.start()
 
     # p_straight.join()
-    p_left_1.join()
-    p_left_2.join()
+    # p_left_1.join()
+    # p_left_2.join()
+    p_bi_left_1.join()
+    p_bi_left_2.join()
     # p_straight_her.join()
+    # p_pe_ver_left_down.join()
     print('parent process ends.')
 
