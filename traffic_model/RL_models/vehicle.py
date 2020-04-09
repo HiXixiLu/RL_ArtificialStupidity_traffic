@@ -97,7 +97,7 @@ class vehicle(object):
             self._velocity = origin_v_south
 
         self._origin_v = copy.deepcopy(self._velocity)
-        self.logger.record_position(self._position)
+        # self.logger.record_position(self._position)
         # log_str = 'agent initialtion: origin - {og}  position - {pos}  velocity - {v}m/frame'.format(v = self._velocity, og = self._origin, pos = self._position)
         # print(log_str)
         # self.logger.write_to_log(log_str)
@@ -312,15 +312,15 @@ class vehicle(object):
         if v_next_ab <= 0.0:
             # 防开倒车
             v_next_ab = pdata.EPSILON
-        elif v_next_ab >= self._get_max_velocity():
+        elif v_next_ab >= self.get_max_velocity():
             # 极限速度修正
-            v_next_ab = self._get_max_velocity()
+            v_next_ab = self.get_max_velocity()
         
         v_next = v_next * v_next_ab
         return v_next
 
 
-    def _get_max_velocity(self):
+    def get_max_velocity(self):
         return pdata.MAX_VELOCITY
 
 
@@ -337,7 +337,7 @@ class vehicle(object):
         pos_next = self._position + v_next 
         self._last_position = copy.deepcopy(self._position)
         self._position = pos_next
-        self.logger.record_position(self._position)
+        # self.logger.record_position(self._position)
         # tmp_str = 'Agent Position: {pos}, Velocity Norm:{norm}'.format(pos = self._position, norm=la.norm(self._velocity))
         # print(tmp_str)
         # self.logger.write_to_log(tmp_str)
@@ -409,14 +409,24 @@ class motorVehicle(vehicle):
         [-pdata.MOTER_L/2, -pdata.MOTOR_W/2]])
         self._width = pdata.MOTOR_W
         self._length = pdata.MOTER_L
+        
+    def get_max_velocity(self):
+        return pdata.MAX_VELOCITY
 
     def save(self):
         # self.logger.write_to_log('Motor : .pth to be saved...')
         self.model.save(pdata.AGENT_TUPLE[0]+'_'+self._origin+'_'+self._veer)
 
+    def save_as(self, level):
+        # 这里level的参数应该是个整数
+        self.model.save(pdata.AGENT_TUPLE[0]+'_'+self._origin+'_'+self._veer+'_'+str(level))
+
     def load(self):
         # self.logger.write_to_log('Motor: .pth to be loaded...')
         self.model.load(pdata.AGENT_TUPLE[0]+'_'+self._origin+'_'+self._veer)
+
+    def load_from(self, mark_name):
+        self.model.load(mark_name)
 
 
 class Bicycle(vehicle):
@@ -439,5 +449,8 @@ class Bicycle(vehicle):
     def load(self):
         # self.logger.write_to_log('Bicycle: .pth to be loaded...')
         self.model.load(pdata.AGENT_TUPLE[1]+'_'+self._origin+'_'+self._veer) 
+
+    def load_from(self, mark_name):
+        self.model.load(mark_name)
 
         

@@ -9,7 +9,7 @@ MAX_VELOCITY = 33.333 / FPS                      # 由 120km/h 的汽车最高�
 MAX_ACCELERATION = 2.315 / FPS               # 机动车的每帧加速度(百公里加速12s折算而来)
 MAX_BICYCLE_AC = 2.0 / FPS                        # 一般单速自行车的最大加速度为 2m/s^2
 MAX_BICYCLE_VEL = 3.333 / FPS                    # 自行车物理上的极限速度约 12km/h
-MAX_HUMAN_VEL = 10.0 / FPS                       # 人类的极限速度是 16m/s，这里取10
+MAX_HUMAN_VEL = 5.0 / FPS                       # 人类的极限速度是 16m/s，这里取5m/s 的快走速度
 LANE_L, LANE_W,  = 18.0, 3.0                # 道路数据都改成浮点数，避免隐式类型转换的坑。单位: m，m，m/s
 MOTER_L, MOTOR_W = 3.8, 1.8                 # 机动车尺寸单位: m，m
 NON_MOTOR_L, NON_MOTOR_W = 1.6, 0.5         # 自行车尺寸单位: m，m （对应26寸自行车，及较为宽裕的骑手宽度）
@@ -40,7 +40,7 @@ TARGET_UPDATE_INTERVAL = 1
 TEST_ITERATION = 10
 LEARNING_RATE = 1e-3     # 0.001的学习率
 GAMMA = 0.99    # discounted factor
-CAPACITY = 50000   # replay buffer size
+CAPACITY = 10   # replay buffer size
 BATCH_SIZE = 64  # minimun batch size
 SEED = False
 RANDOM_SEED = 9527
@@ -51,10 +51,13 @@ LOG_INTERVAL = 50
 LOAD = True    # load model
 RENDER_INTERVAL = 100
 EXPLORATION_NOISE = 0.3     # 探索率
+
 ANGLE_SD = (EXPLORATION_NOISE * np.pi/2) / 2.576     # 正态分布的标准差σ：满足 X~N(0, σ^2) 使上α分位点在 0.2 * np.pi/2 上，其中α=0.005
 NORM_SD = MAX_ACCELERATION / 2.576  # 正态分布的标准差σ：满足 X~N(0, σ^2) 使上α分位点在 0.2 * MAX_ACCELERATION，其中α=0.005
-MAX_EPISODE = 55000    # num of games —— 进行实验的次数，也即Montecarlo序列的采集数
-MAX_LENGTH_OF_TRAJECTORY = 500    # num of frames —— 单次训练最大序列长度
+HUMAN_SD = (EXPLORATION_NOISE * MAX_HUMAN_VEL) / 2.576  # 人类速度标准差
+
+MAX_EPISODE = 10   # num of games —— 进行实验的次数，也即Montecarlo序列的采集数
+MAX_LENGTH_OF_TRAJECTORY = 200    # num of frames —— 单次训练最大序列长度
 PRINT_LOG = 5
 UPDATE_ITERATION = 10   # 一次网络参数更新的均值计算次数
 HER_K = 8   # 1/8 of BATCH_SIZE

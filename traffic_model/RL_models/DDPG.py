@@ -318,7 +318,7 @@ class DDPG(object):
             # mean()：对tensor对象求所有element的均值
             # backward() 以梯度下降的方式更新参数，则将 actor_loss 设置为反向梯度，这样参数便往梯度上升方向更新
             actor_loss = -self.critic(state, self.actor(state)).mean()  
-            # self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
+            # self.writer.add_scalar('Performance/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
             # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
             self.logger.add_to_actor_buffer(actor_loss.item())
 
@@ -528,7 +528,7 @@ class DDPG_PE(object):
             # mean()：对tensor对象求所有element的均值
             # backward() 以梯度下降的方式更新参数，则将 actor_loss 设置为反向梯度，这样参数便往梯度上升方向更新
             actor_loss = -self.critic(state, self.actor(state)).mean()  
-            # self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
+            # self.writer.add_scalar('Performance/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
             # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
             self.logger.add_to_actor_buffer(actor_loss.item())
 
@@ -638,7 +638,7 @@ class DDPG_PE_HER(object):
             # mean()：对tensor对象求所有element的均值
             # backward() 以梯度下降的方式更新参数，则将 actor_loss 设置为反向梯度，这样参数便往梯度上升方向更新
             actor_loss = -self.critic(state, self.actor(state)).mean()  
-            # self.writer.add_scalar('Loss/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
+            # self.writer.add_scalar('Performance/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
             # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
             self.logger.add_to_actor_buffer(actor_loss.item())
 

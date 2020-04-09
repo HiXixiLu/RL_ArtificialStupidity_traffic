@@ -195,10 +195,10 @@ class PedestrianTrainProcess(threading.Thread):
                 for t in count():
                     action = self.agent.select_action(state)
 
-                    # add noise to action 
-                    noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_SD)])
+                    # 在此行人模型中竟然同样使用了和机动车一样的扰动
+                    noise = np.random.normal(0, pdata.HUMAN_SD,size=2)
                     action = action + noise
-                    ratio = pdata.MAX_HUMAN_VEL / (la.norm(self.agent.get_velocity()) + pdata.EPSILON)
+                    ratio = pdata.MAX_HUMAN_VEL / (la.norm(action) + pdata.EPSILON)
                     if ratio < 1:
                         action = ratio * action 
                     next_state, reward, done = self.roads.step(self.agent, action)
@@ -224,32 +224,31 @@ class PedestrianTrainProcess(threading.Thread):
         self.logger.record_pe()  
 
 
-
 if __name__ == '__main__':
     # 初始化数据
     print('parent process start')
     # p_straight = motor_train_process(0, 0, 0)  # 自西往东
     # p_left_1 = motor_train_process(2,1,0)  # 自东往南
     # p_left_2 = motor_train_process(3,1,0) # 自北往东
-    p_bi_left_1 = motor_train_process(2,1,1)
-    p_bi_left_2 = motor_train_process(3,1,1)
+    # p_bi_left_1 = motor_train_process(2,1,1)
+    # p_bi_left_2 = motor_train_process(3,1,1)
     # p_straight_her = motor_train_process_HER(0, 0, 0) #自西往东
-    # p_pe_ver_left_down = PedestrianTrainProcess(1, 2.0, 2) #南部路口通行
+    p_pe_ver_left_down = PedestrianTrainProcess(1, 2.0, 2) #南部路口通行
 
     # p_straight.start()
     # p_left_1.start()
     # p_left_2.start()
-    p_bi_left_1.start()
-    p_bi_left_2.start()
+    # p_bi_left_1.start()
+    # p_bi_left_2.start()
     # p_straight_her.start()
-    # p_pe_ver_left_down.start()
+    p_pe_ver_left_down.start()
 
     # p_straight.join()
     # p_left_1.join()
     # p_left_2.join()
-    p_bi_left_1.join()
-    p_bi_left_2.join()
+    # p_bi_left_1.join()
+    # p_bi_left_2.join()
     # p_straight_her.join()
-    # p_pe_ver_left_down.join()
+    p_pe_ver_left_down.join()
     print('parent process ends.')
 

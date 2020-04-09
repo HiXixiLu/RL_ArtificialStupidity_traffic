@@ -19,7 +19,7 @@ class pedestrian():
         self._last_position = self._position    # 保存上一次移动的位置
         self._origin_v = np.zeros((2))  # 保存初始速度用于计算奖励
         self._destination_world = np.zeros((2))    
-        self._destination_local = np.zeros((2))
+        self._destination_local = np.array([0.0, 2*pdata.LANE_W - 2*pdata.P_W])
         self._vertice_local = np.array([[pdata.P_L/2, -pdata.P_W/2],
         [pdata.P_L/2, pdata.P_W/2],
         [-pdata.P_L/2, pdata.P_W/2],
@@ -111,6 +111,7 @@ class pedestrian():
         self._edge = edge
         self._distance = distance
         self._velocity = copy.deepcopy(self._origin_v)
+        self._position = copy.deepcopy(self._origin_pos)
 
 
     def set_rays(self):
@@ -176,6 +177,9 @@ class pedestrian():
         og = copy.copy(self._origin_pos)
         return og
 
+    def get_max_velocity(self):
+        return pdata.MAX_HUMAN_VEL
+
     # def get_accelation(self):
     #     return self._acceleration
 
@@ -195,6 +199,9 @@ class pedestrian():
     def get_rays(self):
         rays = copy.deepcopy(self._rays)
         return rays
+
+    def get_origin_edge(self):
+        return self._edge
 
     def _set_position(self, pos):
         if not self.check_2darray(pos):

@@ -61,7 +61,7 @@ class logWriter():
             for j in range(0, len(self._position_seq[i])):
                 ss = ss + str(self._position_seq[i][j][0]) + ',' + str(self._position_seq[i][j][1]) + ' '
             ss = ss[:-1]
-            txt_file.write(ss)
+            txt_file.write('\n'+ ss)
         txt_file.close()
 
     def record_pe(self):
@@ -91,7 +91,7 @@ class logWriter():
             for j in range(0, len(self._position_seq[i])):
                 ss = ss + str(self._position_seq[i][j][0]) + ',' + str(self._position_seq[i][j][1]) + ' '
             ss = ss[:-1]
-            txt_file.write(ss)
+            txt_file.write('\n' + ss)
         txt_file.close()
 
 
