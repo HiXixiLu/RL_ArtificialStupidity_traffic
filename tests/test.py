@@ -7,6 +7,14 @@ import torch
 import torch.nn.functional as F
 
 
-     
-if __name__ == '__main__':
-    print(torch.cuda.is_available())
+from threading import Timer
+
+def fun():
+    print("hello, world")
+
+
+if __name__=='__main__':
+    n = np.array([1,2,3,4])
+    a = np.mean(n).item()
+    print(a, type(a))
+

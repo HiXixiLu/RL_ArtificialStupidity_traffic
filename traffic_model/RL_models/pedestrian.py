@@ -253,6 +253,10 @@ class pedestrian():
     def add_to_replaybuffer(self, state, next_state, action, reward, done):
         self.model.replay_buffer.push((state, next_state, action, reward, done))
 
+    def add_to_filter_repleybuffer(self, data_seq):
+        # data_seq : [[next_state, state, action, reward, done]...]
+        self.model.replay_buffer.push(data_seq)
+
     def update_model(self):
         self.model.update()
 

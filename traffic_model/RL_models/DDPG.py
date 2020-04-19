@@ -1,5 +1,5 @@
 from itertools import count
-import os, sys, random
+import os, sys, random, copy
 sys.path.append(os.getcwd() + '/traffic_model/RL_models')
 import numpy as np
 import numpy.linalg as la
@@ -92,6 +92,64 @@ class Replay_buffer_HER():
             d.append(np.array(D, copy=False))
 
         return np.array(x), np.array(y), np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1)
+
+
+class FilterReplayBuffer():
+    def __init__(self, max_size=pdata.CAPACITY):
+        self.storage = []
+        self.max_size = max_size 
+        self.ptr = 0
+        self.max_size
+
+    def sample(self, batch_size):
+        ind = np.random.randint(0, len(self.storage), size= pdata.HER_K)  # 在 0 到 len(self.storage) 之间产生 size 个数
+        x, y, u, r, d = [], [], [], [], []
+
+        # 这里的样本是完全随机的batch_size个
+        for i in ind:
+            X, Y, U, R, D = self.storage[i]
+            X_HER, Y_HER, U_HER, R_HER, D_HER = self.storage[(i+1) % self.max_size] 
+            x.append(np.array(X, copy=False)), x.append(np.array(X_HER, copy=False))
+            y.append(np.array(Y, copy=False)), y.append(np.array(Y_HER, copy=False))
+            u.append(np.array(U, copy=False)), u.append(np.array(U_HER, copy=False))
+            r.append(np.array(R, copy=False)), r.append(np.array(R_HER, copy=False))
+            d.append(np.array(D, copy=False)), d.append(np.array(D_HER, copy=False))
+
+        for i in range(2*pdata.HER_K, batch_size):
+            X, Y, U, R, D = self.storage[i]
+            x.append(np.array(X, copy=False))
+            y.append(np.array(Y, copy=False))
+            u.append(np.array(U, copy=False))
+            r.append(np.array(R, copy=False))
+            d.append(np.array(D, copy=False))
+
+        return np.array(x), np.array(y), np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1)
+
+    # 增加筛选机制 —— 最长递增子序列
+    def push(self, data_seq):
+        # data_seq : [[next_state, state, action, reward, done]...]
+        longest_subseq = []
+        for i in range(0, len(data_seq)):
+            tmp_seq = []    # 保存索引号
+            tmp_seq.append(i)
+            for j in range(i+1, len(data_seq)):
+                if data_seq[j][3] > data_seq[len(tmp_seq)-1][3]:
+                    tmp_seq.append(j)
+            if len(longest_subseq) < len(tmp_seq):
+                longest_subseq = copy.deepcopy(tmp_seq)
+
+        for i in range(0, len(longest_subseq)):
+            self._push((data_seq[i][0], data_seq[i][1], data_seq[i][2], data_seq[i][3], data_seq[i][4]))
+
+    # 真正放入经验池的机制
+    def _push(self, data_tuple):
+        if len(self.storage) == self.max_size:
+            # 经验回放池的超限更新策略
+            self.storage[int(self.ptr)] = data_tuple
+            self.ptr = (self.ptr + 1) % self.max_size       #循环数组更新
+        else:
+            self.storage.append(data_tuple)
+
 
 
 # 行动器 —— 继承自 nn.Module，则必须覆盖的函数有 __init__ 和 forward
@@ -258,7 +316,8 @@ class DDPG(object):
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), pdata.LEARNING_RATE)
 
-        self.replay_buffer = Replay_buffer()    # initiate replay-buffer
+        # self.replay_buffer = Replay_buffer()    # initiate replay-buffer
+        self.replay_buffer = FilterReplayBuffer()
         # self.writer = SummaryWriter(pdata.DIRECTORY)
         self.num_critic_update_iteration = 0
         self.num_actor_update_iteration = 0
@@ -280,7 +339,8 @@ class DDPG(object):
     # update the parameters in actor network and critic network
     # 只有 replay_buffer 中的 storage 超过了样本数量才会调用 update函数
     def update(self):
-
+        critic_loss_list = []
+        actor_performance_list = []
         for it in range(pdata.UPDATE_ITERATION):
             # Sample replay buffer
             x, y, u, r, d = self.replay_buffer.sample(pdata.BATCH_SIZE)     # 随机获取 batch_size 个五元组样本(sample random minibatch)
@@ -306,7 +366,8 @@ class DDPG(object):
             critic_loss = F.mse_loss(current_Q, target_Q) 
             # self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
             # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
-            self.logger.add_to_critic_buffer(critic_loss.item())
+            # self.logger.add_to_critic_buffer(critic_loss.item())
+            critic_loss_list.append(critic_loss.item())
 
             # Optimize the critic
             self.critic_optimizer.zero_grad()   # zeros the gradient buffer
@@ -320,7 +381,8 @@ class DDPG(object):
             actor_loss = -self.critic(state, self.actor(state)).mean()  
             # self.writer.add_scalar('Performance/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
             # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
-            self.logger.add_to_actor_buffer(actor_loss.item())
+            # self.logger.add_to_actor_buffer(actor_loss.item())
+            actor_performance_list.append(actor_loss.item())
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()    # Clears the gradients of all optimized torch.Tensor
@@ -336,6 +398,11 @@ class DDPG(object):
 
             self.num_actor_update_iteration += 1
             self.num_critic_update_iteration += 1
+
+        actor_performance = np.mean(np.array(actor_performance_list)).item()
+        self.logger.add_to_actor_buffer(actor_performance)
+        critic_loss = np.mean(critic_loss_list).item()
+        self.logger.add_to_critic_buffer(critic_loss)
 
 
     def save(self, mark_str):
@@ -395,6 +462,8 @@ class DDPG_HER(DDPG):
     # update the parameters in actor network and critic network
     # 只有 replay_buffer 中的 storage 超过了样本数量才会调用 update函数
     def update(self):
+        critic_loss_list = []
+        actor_performance_list = []
         # 更新次数
         for it in range(pdata.UPDATE_ITERATION):
             # Sample replay buffer
@@ -411,7 +480,8 @@ class DDPG_HER(DDPG):
             current_Q = self.critic(state, action)
             critic_loss = F.mse_loss(current_Q, target_Q) 
             # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
-            self.logger.add_to_critic_buffer(critic_loss.item())
+            # self.logger.add_to_critic_buffer(critic_loss.item())
+            critic_loss_list.append(critic_loss.item())
 
             # Optimize the critic
             self.critic_optimizer.zero_grad()   # zeros the gradient buffer
@@ -420,7 +490,8 @@ class DDPG_HER(DDPG):
 
             actor_loss = -self.critic(state, self.actor(state)).mean()  
             # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
-            self.logger.add_to_actor_buffer(actor_loss.item())
+            # self.logger.add_to_actor_buffer(actor_loss.item())
+            actor_performance_list.append(actor_loss.item())
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()    # Clears the gradients of all optimized torch.Tensor
@@ -436,6 +507,11 @@ class DDPG_HER(DDPG):
 
             self.num_actor_update_iteration += 1
             self.num_critic_update_iteration += 1
+
+        actor_performance = np.mean(np.array(actor_performance_list)).item()
+        self.logger.add_to_actor_buffer(actor_performance)
+        critic_loss = np.mean(critic_loss_list).item()
+        self.logger.add_to_critic_buffer(critic_loss)
 
 
     def save(self, mark_str):
@@ -471,7 +547,8 @@ class DDPG_PE(object):
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), pdata.LEARNING_RATE)
 
-        self.replay_buffer = Replay_buffer()    # initiate replay-buffer
+        # self.replay_buffer = Replay_buffer()    # initiate replay-buffer
+        self.replay_buffer = FilterReplayBuffer()
         # self.writer = SummaryWriter(pdata.DIRECTORY)
         self.num_critic_update_iteration = 0
         self.num_actor_update_iteration = 0
@@ -490,7 +567,8 @@ class DDPG_PE(object):
     # update the parameters in actor network and critic network
     # 只有 replay_buffer 中的 storage 超过了样本数量才会调用 update函数
     def update(self):
-
+        critic_loss_list = []
+        actor_performance_list = []
         for it in range(pdata.UPDATE_ITERATION):
             # Sample replay buffer
             x, y, u, r, d = self.replay_buffer.sample(pdata.BATCH_SIZE)     # 随机获取 batch_size 个五元组样本(sample random minibatch)
@@ -516,7 +594,8 @@ class DDPG_PE(object):
             critic_loss = F.mse_loss(current_Q, target_Q) 
             # self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
             # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
-            self.logger.add_to_critic_buffer(critic_loss.item())
+            # self.logger.add_to_critic_buffer(critic_loss.item())
+            critic_loss_list.append(critic_loss.item())
 
             # Optimize the critic
             self.critic_optimizer.zero_grad()   # zeros the gradient buffer
@@ -530,7 +609,8 @@ class DDPG_PE(object):
             actor_loss = -self.critic(state, self.actor(state)).mean()  
             # self.writer.add_scalar('Performance/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
             # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
-            self.logger.add_to_actor_buffer(actor_loss.item())
+            # self.logger.add_to_actor_buffer(actor_loss.item())
+            actor_performance_list.append(actor_loss.item())
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()    # Clears the gradients of all optimized torch.Tensor
@@ -546,6 +626,11 @@ class DDPG_PE(object):
 
             self.num_actor_update_iteration += 1
             self.num_critic_update_iteration += 1
+
+        actor_performance = np.mean(np.array(actor_performance_list)).item()
+        self.logger.add_to_actor_buffer(actor_performance)
+        critic_loss = np.mean(critic_loss_list).item()
+        self.logger.add_to_critic_buffer(critic_loss)
 
 
     def save(self, mark_str):
@@ -600,7 +685,8 @@ class DDPG_PE_HER(object):
     # update the parameters in actor network and critic network
     # 只有 replay_buffer 中的 storage 超过了样本数量才会调用 update函数
     def update(self):
-
+        critic_loss_list = []
+        actor_performance_list = []
         for it in range(pdata.UPDATE_ITERATION):
             # Sample replay buffer
             x, y, u, r, d = self.replay_buffer.sample(pdata.BATCH_SIZE)     # 随机获取 batch_size 个五元组样本(sample random minibatch)
@@ -626,7 +712,8 @@ class DDPG_PE_HER(object):
             critic_loss = F.mse_loss(current_Q, target_Q) 
             # self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
             # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
-            self.logger.add_to_critic_buffer(critic_loss.item())
+            # self.logger.add_to_critic_buffer(critic_loss.item())
+            critic_loss_list.append(critic_loss.item())
 
             # Optimize the critic
             self.critic_optimizer.zero_grad()   # zeros the gradient buffer
@@ -640,7 +727,8 @@ class DDPG_PE_HER(object):
             actor_loss = -self.critic(state, self.actor(state)).mean()  
             # self.writer.add_scalar('Performance/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
             # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
-            self.logger.add_to_actor_buffer(actor_loss.item())
+            # self.logger.add_to_actor_buffer(actor_loss.item())
+            actor_performance_list.append(actor_loss.item())
 
             # Optimize the actor
             self.actor_optimizer.zero_grad()    # Clears the gradients of all optimized torch.Tensor
@@ -656,6 +744,11 @@ class DDPG_PE_HER(object):
 
             self.num_actor_update_iteration += 1
             self.num_critic_update_iteration += 1
+
+        actor_performance = np.mean(np.array(actor_performance_list)).item()
+        self.logger.add_to_actor_buffer(actor_performance)
+        critic_loss = np.mean(critic_loss_list).item()
+        self.logger.add_to_critic_buffer(critic_loss)
 
 
     def save(self, mark_str):

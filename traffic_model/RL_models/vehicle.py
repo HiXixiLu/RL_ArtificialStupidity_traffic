@@ -97,7 +97,7 @@ class vehicle(object):
             self._velocity = origin_v_south
 
         self._origin_v = copy.deepcopy(self._velocity)
-        # self.logger.record_position(self._position)
+        self.logger.record_position(self._position)
         # log_str = 'agent initialtion: origin - {og}  position - {pos}  velocity - {v}m/frame'.format(v = self._velocity, og = self._origin, pos = self._position)
         # print(log_str)
         # self.logger.write_to_log(log_str)
@@ -319,7 +319,7 @@ class vehicle(object):
         v_next = v_next * v_next_ab
         return v_next
 
-
+ 
     def get_max_velocity(self):
         return pdata.MAX_VELOCITY
 
@@ -337,7 +337,7 @@ class vehicle(object):
         pos_next = self._position + v_next 
         self._last_position = copy.deepcopy(self._position)
         self._position = pos_next
-        # self.logger.record_position(self._position)
+        self.logger.record_position(self._position)
         # tmp_str = 'Agent Position: {pos}, Velocity Norm:{norm}'.format(pos = self._position, norm=la.norm(self._velocity))
         # print(tmp_str)
         # self.logger.write_to_log(tmp_str)
@@ -393,12 +393,18 @@ class vehicle(object):
     def add_to_replaybuffer(self, state, next_state, action, reward, done):
         self.model.replay_buffer.push((state, next_state, action, reward, done))
 
+    def add_to_filter_repleybuffer(self, data_seq):
+        # data_seq : [[next_state, state, action, reward, done]...]
+        self.model.replay_buffer.push(data_seq)
+
     def update_model(self):
         self.model.update()
 
     def get_buffer_storage(self):
         return self.model.replay_buffer.storage
 
+    def get_buffer_storage_len(self):
+        return len(self.model.replay_buffer.storage)
 
 class motorVehicle(vehicle):
     def __init__(self, logger):
@@ -439,7 +445,7 @@ class Bicycle(vehicle):
         self._width = pdata.NON_MOTOR_W
         self._length = pdata.NON_MOTOR_L
 
-    def get_max_velocity(self, vel):
+    def get_max_velocity(self):
         return pdata.MAX_BICYCLE_VEL
 
     def save(self):
