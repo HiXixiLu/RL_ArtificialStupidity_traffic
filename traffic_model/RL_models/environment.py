@@ -1,12 +1,11 @@
-import sys,os,math
-sys.path.append(os.getcwd() + '/traffic_model/RL_models')
+import math
 import copy
 import numpy as np 
 from numpy import linalg as la
 import public_data as pdata
 import geometry as geo
-from RL_models.vehicle import motorVehicle, Bicycle, vehicle
-from RL_models.pedestrian import pedestrian
+from RL_models.vehicle import motorVehicle, Bicycle, vehicle,MotorVehicleMA,BicycleMA
+from RL_models.pedestrian import pedestrian, PedestrianMA
 
 
 # 写死的12个合法行驶区域，对应12个 出发-目的 对
@@ -143,6 +142,13 @@ edges.append(seg)
 seg = np.array([[-pdata.LANE_W, pdata.LANE_W], [-pdata.LANE_L - pdata.LANE_W, pdata.LANE_W]])
 edges.append(seg)
 
+# 写死的4个路口目的地终点线
+intersection_des_seg = {}
+intersection_des_seg['s'] = np.array([[-pdata.LANE_W, -pdata.LANE_W], [0.0, -pdata.LANE_W]])
+intersection_des_seg['e'] = np.array([[pdata.LANE_W, -pdata.LANE_W], [pdata.LANE_W, 0.0]])
+intersection_des_seg['n'] = np.array([[pdata.LANE_W, pdata.LANE_W], [0.0, pdata.LANE_W]])
+intersection_des_seg['w'] = np.array([[0.0, pdata.LANE_W], [-pdata.LANE_W, pdata.LANE_W]])
+
 
 class TrainingEnvironment():
     # class property —— 在整个实例化的对象中是公用的，且通常不作为实例变量使用
@@ -271,13 +277,12 @@ class TrainingEnvironment():
     #     return state_feature
 
 
-    # 2020-3-30：改为12个射线检测方向，最远观察距离为上限，其余以检测到的最近距离表征
     def _get_state_feature(self, agent):
         rays = agent.get_rays()
         state = np.ones(pdata.STATE_DIMENSION)
         for i in range(0, len(rays)):
-            crosspoints = self._get_seg_ray_crosspoints(rays[i], edges)                       
-            nearest = self._get_nearest_distance(rays[i].s_point, crosspoints)
+            crosspoints = geo.get_seg_ray_crosspoints(rays[i], edges)                       
+            nearest = geo.get_nearest_distance(rays[i].s_point, crosspoints)
             if nearest > pdata.OBSERVATION_LIMIT:
                 state[i] = pdata.OBSERVATION_LIMIT
             else:
@@ -293,59 +298,6 @@ class TrainingEnvironment():
         return state
 
 
-    def _get_nearest_distance(self, origin, pos_list):
-        nearest = float('inf')
-        for i in range(0, len(pos_list)):
-            distance = la.norm(pos_list[i] - origin)
-            if distance < nearest:
-                nearest = distance
-        return nearest
-
-    # 直线方程： ax + by = c
-    def _get_ray_box_crosspoints(self, ray, box_vertices):
-        points = []
-        for i in range(0, len(box_vertices)):
-            seg = [box_vertices[i], box_vertices[(i+1)%len(box_vertices)]]
-            if self._cross_check(seg, ray):
-                seg_a = -(seg[1][1]-seg[0][1]) / (seg[1][0] - seg[0][0] if seg[1][0] - seg[0][0] else pdata.EPSILON) # -k:k为斜率
-                seg_b = 1.0
-                seg_c = seg_a * seg[0][0] + seg[0][1]
-                # 直线交点
-                point = la.solve(np.array([[-ray.sin, ray.cos], [seg_a, seg_b]]), np.array([-ray.sin*ray.s_point[0]+ray.cos*ray.s_point[1], seg_c]))
-                # 是否在射线上
-                tmp_vec = point - ray.s_point
-                dot_product = tmp_vec.dot(np.array([ray.cos, ray.sin]))
-                if dot_product > pdata.EPSILON:
-                    points.append(copy.deepcopy(point))
-        return points
-
-    # ax + by = c
-    def _get_seg_ray_crosspoints(self, ray, seg_list):
-        points = []
-        for i in range(0, len(seg_list)):
-            seg = seg_list[i]
-            if self._cross_check(seg, ray):
-                seg_a = -(seg[1][1]-seg[0][1]) / (seg[1][0] - seg[0][0] if seg[1][0] - seg[0][0] else pdata.EPSILON) # -k:k为斜率
-                seg_b = 1.0
-                seg_c = seg_a * seg[0][0] + seg[0][1]
-                # 直线交点
-                point = la.solve(np.array([[-ray.sin, ray.cos], [seg_a, seg_b]]), np.array([-ray.sin*ray.s_point[0]+ray.cos*ray.s_point[1], seg_c]))
-                # 是否在射线上
-                tmp_vec = point - ray.s_point
-                dot_product = tmp_vec.dot(np.array([ray.cos, ray.sin]))
-                if dot_product > pdata.EPSILON:
-                    points.append(copy.deepcopy(point))
-        return points  
-
-
-    # 端点异侧返回 True，否则返回 False
-    def _cross_check(self, seg, ray):
-        vec1, vec2 = seg[0] - ray.s_point, seg[1] - ray.s_point
-        unit = np.array([ray.cos, ray.sin])
-        res = np.cross(unit, vec1) * np.cross(unit, vec2)
-        return res < 0
-            
-
     # when collision happened, return true
     # 需要逆时针排列的顶点坐标: tri_vtx.shape=(3,2), rect_vtx.shape=(4,2)
     # 先进行三边相交测试，再进行矩形顶点是否在三角形内测试
@@ -354,11 +306,11 @@ class TrainingEnvironment():
         # 1) 线段与矩形是否相交的测试 —— 若线段与多边形所有的边都没有交点，则不相交（可能在内部的情况不用考虑了，因为另两条边一定会相交）
         for i in range(0, len(tri_vtx)):
             seg = np.array([tri_vtx[i], tri_vtx[(i+1)%3]])
-            if self._segment_test(seg, rect_vtx):
+            if geo.segment_test(seg, rect_vtx):
                 return True
 
         # 2) 顶点是否在三角形内，使用逆时针连接的三边做向量点积就可以了（因为没有可能出现三角形在矩形内部的情况）
-        intersected = self._vertex_test(tri_vtx, rect_vtx)
+        intersected = geo.vertex_test(tri_vtx, rect_vtx)
         return intersected
 
    
@@ -368,109 +320,9 @@ class TrainingEnvironment():
         for i in range(0, len(tri_vtx)):
             seg = np.array([tri_vtx[i], tri_vtx[(i+1)%3]])
             for j in range(0, 8):
-                if self._seg_seg_test(seg, edges[j]):
+                if geo.seg_seg_test(seg, edges[j]):
                     return True
         return False
-
-
-    # 判断两个线段是否相交：相交则返回True，否则返回False
-    def _seg_seg_test(self, seg1, seg2):
-        # seg1, seg2 : np.ndarray
-        # 快速排除测试
-        if not self.judge_aabb(seg1, seg2):
-            return False
-        # 求叉乘
-        sign = 0
-        vec = seg1[1] - seg1[0]
-        tmp_vec1, tmp_vec2 = seg2[0] - seg1[0], seg2[1] - seg1[0]
-        cross1 = np.cross(vec, tmp_vec1)
-        cross2 = np.cross(vec, tmp_vec2)
-        if cross1 * cross2 <= 0:
-            sign += 1
-        vec = seg2[1] - seg2[0]
-        tmp_vec1, tmp_vec2 = seg1[0] - seg2[0], seg1[1] - seg2[0]
-        cross1 = np.cross(vec, tmp_vec1)
-        cross2 = np.cross(vec, tmp_vec2)
-        if cross1 * cross2 <= 0:
-            sign += 1
-        if sign == 2:
-            return True
-        else:
-            return False
-
-
-    # 测试 AABB盒 是否直接分离，如果相交返回True，否则返回False
-    def judge_aabb(self, seg1, seg2):
-        return (min(seg1[0][0], seg1[1][0]) <= max(seg2[0][0], seg2[1][0]) and 
-        max(seg1[0][0], seg1[1][0]) >= min(seg2[0][0], seg2[1][0]) and
-        min(seg1[0][1], seg1[1][1]) <= max(seg2[0][1], seg2[1][1]) and
-        max(seg1[0][1], seg1[1][1]) >= min(seg2[0][1], seg2[1][1]))
-
-
-    # 注意参数这里是传引用
-    # seg.shape = (2,2), rect_vtx.shape = (4, 2)
-    def _segment_test(self, seg, rect_vtx):
-        flag = False
-        delta = seg[0]  # delta:待移动的向量距离[x, y], 线段起点
-        seg_copy, rect_vtx_copy = seg, rect_vtx
-
-        # 平移
-        for i in range(0, len(seg_copy)):
-            seg_copy[i] -= delta
-        for i in range(0, len(rect_vtx_copy)):
-            rect_vtx_copy[i] -= delta
-
-        # 计算以segment为横轴的坐标系的非平移的基在原点坐标系中的表示
-        u_b_x = (seg_copy[1] - seg_copy[0]) / la.norm((seg_copy[1] - seg_copy[0]))  # u_x, u_y: 由线段确定的坐标系在原点坐标系中的基
-        u_b_y = np.matmul(geo.rotate90_mat, u_b_x)
-        base_b = np.array([u_b_x, u_b_y])  # 基底
-        base_b_reverse = la.inv(base_b)
-
-        # segment坐标系相对于原点的平移
-        translation_mat = np.array([[1, 0, seg_copy[0][0]], [0, 1, seg_copy[0][1]], [0, 0, 1]])
-        # 矩形顶点坐标（原点系）到segment坐标系的变换
-        for i in range(0, len(rect_vtx_copy)):
-            tmp = np.ndarray.tolist(rect_vtx_copy[i])
-            tmp.append(1)
-            tmp = np.array(tmp)   # [x, y, 1]
-            tmp = np.matmul(translation_mat, tmp)
-            tmp = tmp[0:2]  
-            rect_vtx_copy[i] = np.matmul(base_b_reverse, tmp)   # 得到 segment 坐标系下的坐标值
-
-        for i in range(0, len(rect_vtx_copy)):
-            seg_line = np.array([rect_vtx_copy[i], rect_vtx_copy[(i+1)%4]])
-            if seg_line[0][1] * seg_line[1][1] > 0:
-                continue    # 不相交
-            else:
-                x1, y1, x2, y2 = seg_line[0][0], seg_line[0][1], seg_line[1][0], seg_line[1][1]
-                x_p = y1 / (y2 - y1) * (x2 - x1) + x1   # 这里容易产生 Nan值
-                if x_p > 0 and x_p < seg_copy[1][1]:
-                    flag = True  # 线段相交
-                    return flag
-        return flag
-
-
-    def _vertex_test(self, tri_vtx, rect_vtx):
-        flag = False
-        for i in range(0, len(rect_vtx)):
-            vtx = rect_vtx[i]
-            # 矩形顶点是否在三角形内
-            count = 0
-            for j in range(0, len(tri_vtx)):
-                start = tri_vtx[j]
-                end = tri_vtx[(j+1)%3]
-                res = np.dot(end-start, vtx-start)
-                # 当前点不在三角形内
-                if res < 0:
-                    break
-                else:
-                    count += 1
-            # 只要有一个矩形顶点在三角形内
-            if count >= 3:
-                flag = True
-                break
-                
-        return flag
 
 
     # shaped reward: 需要专家知识
@@ -508,12 +360,19 @@ class TrainingEnvironment():
         # 速度奖励
         velocity = agent.get_velocity()
         norm_v = la.norm(velocity)
-        if  norm_v >= pdata.VELOCITY_LIMIT:
-            _r_v = -10 * (norm_v - pdata.VELOCITY_LIMIT)
+
+        if isinstance(agent, motorVehicle):
+            v_limit = pdata.VELOCITY_LIMIT
+        elif isinstance(agent, Bicycle):
+            v_limit = pdata.MAX_BICYCLE_VEL
+
+        if  norm_v >= v_limit:
+            _r_v = -10 * (norm_v - v_limit)
         elif norm_v:
-            # cos奖励 —— 与初始速度越接近，奖励越大
-            origin_v = agent.get_origin_v()
-            cosine = origin_v.dot(velocity) / (la.norm(origin_v) * norm_v) 
+            # cos奖励 —— 当前速度与目标点重合方向越贴近，奖励越高
+            relative_pos = agent.get_destination_local()
+            unit = np.array([0.0, 1.0])
+            cosine = relative_pos.dot(unit) / (la.norm(relative_pos) + pdata.EPSILON)
             _r_v = 10 * cosine + 10 * norm_v  
         else:
             _r_v = 0
@@ -533,6 +392,7 @@ class TrainingEnvironment():
         reward = _r_d + _r_v + _r_lane_change
         # print('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity), file = pdata.EXPERIMENT_LOG)
         # self.logger.write_to_log('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
+        # print('reward:' + str(reward))
         return reward 
 
 
@@ -560,12 +420,14 @@ class TrainingEnvironment():
         # 速度奖励
         velocity = agent.get_velocity()
         norm_v = la.norm(velocity)
+
         if  norm_v >= pdata.MAX_HUMAN_VEL:
             _r_v = -10 * (norm_v - pdata.MAX_HUMAN_VEL)
         elif norm_v:
-            # cos奖励 —— 与初始速度越接近，奖励越大
-            origin_v = agent.get_origin_v()
-            cosine = origin_v.dot(velocity) / (la.norm(origin_v) * norm_v) 
+            # cos奖励 —— 当前速度与目标点重合方向越贴近，奖励越高
+            relative_pos = agent.get_destination_local()
+            unit = np.array([0.0, 1.0])
+            cosine = relative_pos.dot(unit) / (la.norm(relative_pos) + pdata.EPSILON)
             _r_v = 10 * cosine + 10 * norm_v  
         else:
             _r_v = 0
@@ -652,20 +514,7 @@ class TrainingEnvironment():
         vertice1 = agent1.get_vertice()
         for i in range(0, len(agent_set)):
             vertice2 = agent_set[i].get_vertice()
-            if self._check_obb_collision(vertice1, vertice2):
-                return True
-        return False
-        
-
-    # OBB盒碰撞测试
-    def _check_obb_collision(self, box1, box2):
-        #return Ture: if obb has collision
-        if box1.shape != (4,2) or box2.shape != (4,2):
-            print("_check_obb_collision : invalid argument")
-            return False
-        for i in range(0, 4):
-            seg = np.array([box1[i], box1[(i+1)%4]])
-            if self._segment_test(seg, box2):
+            if geo.check_obb_collision(vertice1, vertice2):
                 return True
         return False
 
@@ -677,29 +526,29 @@ class TrainingEnvironment():
         _origin = agent.get_origin()
         _des = agent.get_des_string()
         if _origin == 'east' and _des == 'south':
-            return self.box_inside_polygon(vertice, polygons['e_s'])
+            return geo.box_inside_polygon(vertice, polygons['e_s'])
         elif _origin == 'east' and _des == 'west':
-            return self.box_inside_polygon(vertice, polygons['e_w'])
+            return geo.box_inside_polygon(vertice, polygons['e_w'])
         elif _origin == 'east' and _des == 'north':
-            return self.box_inside_polygon(vertice, polygons['e_n'])  
+            return geo.box_inside_polygon(vertice, polygons['e_n'])  
         elif _origin == 'north' and _des == 'east':
-            return self.box_inside_polygon(vertice, polygons['n_e'])
+            return geo.box_inside_polygon(vertice, polygons['n_e'])
         elif _origin == 'north' and _des == 'south':
-            return self.box_inside_polygon(vertice, polygons['n_s'])
+            return geo.box_inside_polygon(vertice, polygons['n_s'])
         elif _origin == 'north' and _des == 'west':
-            return self.box_inside_polygon(vertice, polygons['n_w'])
+            return geo.box_inside_polygon(vertice, polygons['n_w'])
         elif _origin == 'west' and _des == 'south':
-            return self.box_inside_polygon(vertice, polygons['w_s'])
+            return geo.box_inside_polygon(vertice, polygons['w_s'])
         elif _origin == 'west' and _des == 'east':
-            return self.box_inside_polygon(vertice, polygons['w_e'])
+            return geo.box_inside_polygon(vertice, polygons['w_e'])
         elif _origin == 'west' and _des == 'north':
-            return self.box_inside_polygon(vertice, polygons['w_n'])
+            return geo.box_inside_polygon(vertice, polygons['w_n'])
         elif _origin == 'south' and _des == 'east':
-            return self.box_inside_polygon(vertice, polygons['s_e'])
+            return geo.box_inside_polygon(vertice, polygons['s_e'])
         elif _origin == 'south' and _des == 'north':
-            return self.box_inside_polygon(vertice, polygons['s_n'])
+            return geo.box_inside_polygon(vertice, polygons['s_n'])
         elif _origin == 'south' and _des == 'west':
-            return self.box_inside_polygon(vertice, polygons['s_w'])
+            return geo.box_inside_polygon(vertice, polygons['s_w'])
 
 
     # 是否到达目标点的测量 —— 以是否与路口大矩形相交来判断（Xixi 你是不是写碰撞写到失心疯）
@@ -733,31 +582,31 @@ class TrainingEnvironment():
         agent_cross = np.array([agent.get_position(),agent.get_last_position()])
         if isinstance(agent, vehicle):
             if agent.get_des_string() == 'south':
-                return self._seg_seg_test(agent_cross, des_seg['s'])
+                return geo.seg_seg_test(agent_cross, des_seg['s'])
             elif agent.get_des_string() == 'east':
-                return self._seg_seg_test(agent_cross, des_seg['e'])
+                return geo.seg_seg_test(agent_cross, des_seg['e'])
             elif agent.get_des_string() == 'north':
-                return self._seg_seg_test(agent_cross, des_seg['n'])
+                return geo.seg_seg_test(agent_cross, des_seg['n'])
             elif agent.get_des_string() == 'west':
-                return self._seg_seg_test(agent_cross, des_seg['w'])
+                return geo.seg_seg_test(agent_cross, des_seg['w'])
 
         if isinstance(agent, pedestrian):
             if agent.get_origin_edge() == 0:
-                return self._seg_seg_test(agent_cross, edges[7])
+                return geo.seg_seg_test(agent_cross, edges[7])
             elif agent.get_origin_edge() == 1:
-                return self._seg_seg_test(agent_cross, edges[2])
+                return geo.seg_seg_test(agent_cross, edges[2])
             elif agent.get_origin_edge() == 2:
-                return self._seg_seg_test(agent_cross, edges[1])
+                return geo.seg_seg_test(agent_cross, edges[1])
             elif agent.get_origin_edge() == 3:
-                return self._seg_seg_test(agent_cross, edges[4])
+                return geo.seg_seg_test(agent_cross, edges[4])
             elif agent.get_origin_edge() == 4:
-                return self._seg_seg_test(agent_cross, edges[4])
+                return geo.seg_seg_test(agent_cross, edges[4])
             elif agent.get_origin_edge() == 5:
-                return self._seg_seg_test(agent_cross, edges[6])
+                return geo.seg_seg_test(agent_cross, edges[6])
             elif agent.get_origin_edge() == 6:
-                return self._seg_seg_test(agent_cross, edges[5])
+                return geo.seg_seg_test(agent_cross, edges[5])
             elif agent.get_origin_edge() == 7:
-                return self._seg_seg_test(agent_cross, edges[0])
+                return geo.seg_seg_test(agent_cross, edges[0])
 
 
     # return True when agent's position is out of region
@@ -790,53 +639,6 @@ class TrainingEnvironment():
         return info_list      
 
 
-    # 点在多边形内部的射线检测
-    # point : 表示平面点坐标的 numpy ndarray
-    # polygon：表示平面多边形的顶点集合
-    def rt_test(self, point, polygon): 
-        _inside = False
-        # 判断多边形的顶点是否有效
-        if not isinstance(polygon, np.ndarray) or polygon.shape[1] != 2:
-            print("rt_test : arguments should be a numpy ndarray")
-            return
-
-        if not isinstance(point, np.ndarray) or point.shape[0] != 2:
-            print('rt_test : arguments should be a numpy ndarray')
-            return
-
-        _rows = polygon.shape[0]
-        for i in range(_rows):
-            _start, _end = polygon[i], polygon[(i+1)%_rows] 
-            radio_y = point[1]      # 以x轴的平行线作为射线
-            left_count , right_count = 0, 0
-
-            if((_start[1] - radio_y) * (_end[1] - radio_y) < 0):
-                slope = (_start[1] - _end[1]) / ((_start[0] - _end[1]) + pdata.EPSILON)
-                cross_x = (radio_y - _start[1]) / slope + _start[0]
-                if cross_x < point[0]:
-                    left_count += 1
-                elif cross_x > point[1]:
-                    right_count += 1
-
-        if left_count & 1 == 1 and right_count  & 1 == 1:
-            _inside = True
-
-        return _inside
-
-
-    # 矩形是否在某个多边形内部的检测
-    def box_inside_polygon(self, box, polygon):
-        if not isinstance(box, np.ndarray) or not isinstance(polygon, np.ndarray):
-            print('box_inside_polygon : arguments should be a numpy ndarray')
-
-        count = box.shape[0]
-        for i in range(count):
-            if not self.rt_test(box[i], polygon):
-                return False
-
-        return True
-
-
     # 环境的 reset —— 重置单个agent
     def reset(self,agent):
         # print('\n -----------agent reset---------- \n')
@@ -845,6 +647,7 @@ class TrainingEnvironment():
         return self._get_state_feature(agent)
 
 
+# 2020-5-22: 未用到
 class GameEnvironment():
     vehicle_set = []
     pedestrian_set = []
@@ -943,10 +746,10 @@ class GameEnvironment():
             vtxs.append(game_pedestrian_set[j].get_vertice())
 
         for i in range(0, len(rays)):
-            crosspoints = self._get_seg_ray_crosspoints(rays[i], edges)                       
-            crosspoints_agent = self._get_ray_box_crosspoints(rays[i], vtxs)
+            crosspoints = geo.get_seg_ray_crosspoints(rays[i], edges)                       
+            crosspoints_agent = geo.get_ray_box_crosspoints(rays[i], vtxs)
             crosspoints.extend(crosspoints_agent)
-            nearest = self._get_nearest_distance(rays[i].s_point, crosspoints)
+            nearest = geo.get_nearest_distance(rays[i].s_point, crosspoints)
 
             if nearest > pdata.OBSERVATION_LIMIT:
                 state[i] = pdata.OBSERVATION_LIMIT
@@ -961,6 +764,7 @@ class GameEnvironment():
         state[start_idx+2] = (agent_des_local[0] + 2*(pdata.LANE_W + pdata.LANE_L)) / (4*(pdata.LANE_L + pdata.LANE_W))
         state[start_idx+3] = (agent_des_local[1] + 2*(pdata.LANE_L+pdata.LANE_W)) / (4*(pdata.LANE_L + pdata.LANE_W))
         return state
+
 
     # TODO: 这里注释取消掉以后会有语法错误
     def _get_state_feature(self, agent):
@@ -978,15 +782,14 @@ class GameEnvironment():
         #     vtxs.append((self.pedestrian_set[j].get_vertice())
 
         for i in range(0, len(rays)):
-            crosspoints = self._get_seg_ray_crosspoints(rays[i], edges)                       
-            crosspoints_agent = self._get_ray_box_crosspoints(rays[i], vtxs)
+            crosspoints = geo.get_seg_ray_crosspoints(rays[i], edges)                       
+            crosspoints_agent = geo.get_ray_box_crosspoints(rays[i], vtxs)
             crosspoints.extend(crosspoints_agent)
-            nearest = self._get_nearest_distance(rays[i].s_point, crosspoints)
+            nearest = geo.get_nearest_distance(rays[i].s_point, crosspoints)
             if nearest > pdata.OBSERVATION_LIMIT:
                 state[i] = pdata.OBSERVATION_LIMIT
             else:
                 state[i] = nearest
-            # state[i] = state[i] / pdata.OBSERVATION_LIMIT   # Min-Max归一化
 
         start_idx = pdata.STATE_DIMENSION - 4
         agent_v, agent_des_local = agent.get_velocity(), agent.get_destination_local()
@@ -995,59 +798,6 @@ class GameEnvironment():
         state[start_idx+2] = (agent_des_local[0] + 2*(pdata.LANE_W + pdata.LANE_L)) / (4*(pdata.LANE_L + pdata.LANE_W))
         state[start_idx+3] = (agent_des_local[1] + 2*(pdata.LANE_L+pdata.LANE_W)) / (4*(pdata.LANE_L + pdata.LANE_W))
         return state
-
-
-    # 直线方程： ax + by = c
-    def _get_ray_box_crosspoints(self, ray, box_vertices):
-        points = []
-        for i in range(0, len(box_vertices)):
-            seg = [box_vertices[i], box_vertices[(i+1)%len(box_vertices)]]
-            if self._cross_check(seg, ray):
-                seg_a = -(seg[1][1]-seg[0][1]) / (seg[1][0] - seg[0][0] if seg[1][0] - seg[0][0] else pdata.EPSILON) # -k:k为斜率
-                seg_b = 1.0
-                seg_c = seg_a * seg[0][0] + seg[0][1]
-                # 直线交点
-                point = la.solve(np.array([[-ray.sin, ray.cos], [seg_a, seg_b]]), np.array([-ray.sin*ray.s_point[0]+ray.cos*ray.s_point[1], seg_c]))
-                # 是否在射线上
-                tmp_vec = point - ray.s_point
-                dot_product = tmp_vec.dot(np.array([ray.cos, ray.sin]))
-                if dot_product > pdata.EPSILON:
-                    points.append(copy.deepcopy(point))
-        return points
-
-    def _get_seg_ray_crosspoints(self, ray, seg_list):
-        points = []
-        for i in range(0, len(seg_list)):
-            seg = seg_list[i]
-            if self._cross_check(seg, ray):
-                seg_a = -(seg[1][1]-seg[0][1]) / (seg[1][0] - seg[0][0] if seg[1][0] - seg[0][0] else pdata.EPSILON) # -k:k为斜率
-                seg_b = 1.0
-                seg_c = seg_a * seg[0][0] + seg[0][1]
-                # 直线交点
-                point = la.solve(np.array([[-ray.sin, ray.cos], [seg_a, seg_b]]), np.array([-ray.sin*ray.s_point[0]+ray.cos*ray.s_point[1], seg_c]))
-                # 是否在射线上
-                tmp_vec = point - ray.s_point
-                dot_product = tmp_vec.dot(np.array([ray.cos, ray.sin]))
-                if dot_product > pdata.EPSILON:
-                    points.append(copy.deepcopy(point))
-        return points  
-
-
-    # 端点异侧返回 True，否则返回 False
-    def _cross_check(self, seg, ray):
-        vec1, vec2 = seg[0] - ray.s_point, seg[1] - ray.s_point
-        unit = np.array([ray.cos, ray.sin])
-        res = np.cross(unit, vec1) * np.cross(unit, vec2)
-        return res < 0
-
-
-    def _get_nearest_distance(self, origin, pos_list):
-        nearest = float('inf')
-        for i in range(0, len(pos_list)):
-            distance = la.norm(pos_list[i] - origin)
-            if distance < nearest:
-                nearest = distance
-        return nearest
 
 
     # shaped reward: 需要专家知识
@@ -1136,13 +886,15 @@ class GameEnvironment():
         reward = _r_d + _r_v
         return reward 
 
+
     def _check_termination(self, reward):
         if abs(reward) == pdata.MAIN_REWARD:
             return True
         else:
             return False
 
-     # Agent间的碰撞检查 —— SAT算法
+
+    # Agent间的碰撞检查 —— SAT算法
     # TODO: 针对多智能体碰撞的检测
     def _check_agent_collision(self, agent):
         collision = False
@@ -1164,24 +916,11 @@ class GameEnvironment():
         vertice1 = agent1.get_vertice()
         for i in range(0, len(agent_set)):
             vertice2 = agent_set[i].get_vertice()
-            if self._check_obb_collision(vertice1, vertice2):
+            if geo.check_obb_collision(vertice1, vertice2):
                 return True
         return False
-        
-
-    # OBB盒碰撞测试
-    def _check_obb_collision(self, box1, box2):
-        #return Ture: if obb has collision
-        if box1.shape != (4,2) or box2.shape != (4,2):
-            print("_check_obb_collision : invalid argument")
-            return False
-        for i in range(0, 4):
-            seg = np.array([box1[i], box1[(i+1)%4]])
-            if self._segment_test(seg, box2):
-                return True
-        return False
-
-
+    
+    
     # 矩形是否行驶在合法区域内的碰撞检测 —— 顶点是否全部在合理行驶区域内
     def _check_bound(self, agent):
         # return False : if box is not inside the bound
@@ -1189,29 +928,29 @@ class GameEnvironment():
         _origin = agent.get_origin()
         _des = agent.get_des_string()
         if _origin == 'east' and _des == 'south':
-            return self.box_inside_polygon(vertice, polygons['e_s'])
+            return geo.box_inside_polygon(vertice, polygons['e_s'])
         elif _origin == 'east' and _des == 'west':
-            return self.box_inside_polygon(vertice, polygons['e_w'])
+            return geo.box_inside_polygon(vertice, polygons['e_w'])
         elif _origin == 'east' and _des == 'north':
-            return self.box_inside_polygon(vertice, polygons['e_n'])  
+            return geo.box_inside_polygon(vertice, polygons['e_n'])  
         elif _origin == 'north' and _des == 'east':
-            return self.box_inside_polygon(vertice, polygons['n_e'])
+            return geo.box_inside_polygon(vertice, polygons['n_e'])
         elif _origin == 'north' and _des == 'south':
-            return self.box_inside_polygon(vertice, polygons['n_s'])
+            return geo.box_inside_polygon(vertice, polygons['n_s'])
         elif _origin == 'north' and _des == 'west':
-            return self.box_inside_polygon(vertice, polygons['n_w'])
+            return geo.box_inside_polygon(vertice, polygons['n_w'])
         elif _origin == 'west' and _des == 'south':
-            return self.box_inside_polygon(vertice, polygons['w_s'])
+            return geo.box_inside_polygon(vertice, polygons['w_s'])
         elif _origin == 'west' and _des == 'east':
-            return self.box_inside_polygon(vertice, polygons['w_e'])
+            return geo.box_inside_polygon(vertice, polygons['w_e'])
         elif _origin == 'west' and _des == 'north':
-            return self.box_inside_polygon(vertice, polygons['w_n'])
+            return geo.box_inside_polygon(vertice, polygons['w_n'])
         elif _origin == 'south' and _des == 'east':
-            return self.box_inside_polygon(vertice, polygons['s_e'])
+            return geo.box_inside_polygon(vertice, polygons['s_e'])
         elif _origin == 'south' and _des == 'north':
-            return self.box_inside_polygon(vertice, polygons['s_n'])
+            return geo.box_inside_polygon(vertice, polygons['s_n'])
         elif _origin == 'south' and _des == 'west':
-            return self.box_inside_polygon(vertice, polygons['s_w'])
+            return geo.box_inside_polygon(vertice, polygons['s_w'])
 
 
     # 是否到达目标点 —— 用距离来判断 (2020-4-9: 废弃)
@@ -1228,57 +967,31 @@ class GameEnvironment():
         agent_cross = agent.get_position() - agent.get_last_position()
         if isinstance(agent, vehicle):
             if agent.get_des_string() == 'south':
-                return self._seg_seg_test(agent_cross, des_seg['s'])
+                return geo.seg_seg_test(agent_cross, des_seg['s'])
             elif agent.get_des_string() == 'east':
-                return self._seg_seg_test(agent_cross, des_seg['e'])
+                return geo.seg_seg_test(agent_cross, des_seg['e'])
             elif agent.get_des_string() == 'north':
-                return self._seg_seg_test(agent_cross, des_seg['n'])
+                return geo.seg_seg_test(agent_cross, des_seg['n'])
             elif agent.get_des_string() == 'west':
-                return self._seg_seg_test(agent_cross, des_seg['w'])
+                return geo.seg_seg_test(agent_cross, des_seg['w'])
 
         if isinstance(agent, pedestrian):
             if agent.get_origin_edge() == 0:
-                return self._seg_seg_test(agent_cross, edges[7])
+                return geo.seg_seg_test(agent_cross, edges[7])
             elif agent.get_origin_edge() == 1:
-                return self._seg_seg_test(agent_cross, edges[2])
+                return geo.seg_seg_test(agent_cross, edges[2])
             elif agent.get_origin_edge() == 2:
-                return self._seg_seg_test(agent_cross, edges[1])
+                return geo.seg_seg_test(agent_cross, edges[1])
             elif agent.get_origin_edge() == 3:
-                return self._seg_seg_test(agent_cross, edges[4])
+                return geo.seg_seg_test(agent_cross, edges[4])
             elif agent.get_origin_edge() == 4:
-                return self._seg_seg_test(agent_cross, edges[4])
+                return geo.seg_seg_test(agent_cross, edges[4])
             elif agent.get_origin_edge() == 5:
-                return self._seg_seg_test(agent_cross, edges[6])
+                return geo.seg_seg_test(agent_cross, edges[6])
             elif agent.get_origin_edge() == 6:
-                return self._seg_seg_test(agent_cross, edges[5])
+                return geo.seg_seg_test(agent_cross, edges[5])
             elif agent.get_origin_edge() == 7:
-                return self._seg_seg_test(agent_cross, edges[0])
-
-
-     # 判断两个线段是否相交：相交则返回True，否则返回False
-    def _seg_seg_test(self, seg1, seg2):
-        # seg1, seg2 : np.ndarray
-        # 快速排除测试
-        if not self.judge_aabb(seg1, seg2):
-            return False
-        # 求叉乘
-        sign = 0
-        vec = seg1[1] - seg1[0]
-        tmp_vec1, tmp_vec2 = seg2[0] - seg1[0], seg2[1] - seg1[0]
-        cross1 = np.cross(vec, tmp_vec1)
-        cross2 = np.cross(vec, tmp_vec2)
-        if cross1 * cross2 <= 0:
-            sign += 1
-        vec = seg2[1] - seg2[0]
-        tmp_vec1, tmp_vec2 = seg1[0] - seg2[0], seg1[1] - seg2[0]
-        cross1 = np.cross(vec, tmp_vec1)
-        cross2 = np.cross(vec, tmp_vec2)
-        if cross1 * cross2 <= 0:
-            sign += 1
-        if sign == 2:
-            return True
-        else:
-            return False
+                return geo.seg_seg_test(agent_cross, edges[0])
 
 
     # return True when agent's position is out of region
@@ -1298,88 +1011,331 @@ class GameEnvironment():
             return True
         return False
 
-     # 矩形是否在某个多边形内部的检测
-    def box_inside_polygon(self, box, polygon):
-        if not isinstance(box, np.ndarray) or not isinstance(polygon, np.ndarray):
-            print('box_inside_polygon : arguments should be a numpy ndarray')
 
-        count = box.shape[0]
-        for i in range(count):
-            if not self.rt_test(box[i], polygon):
-                return False
-        return True
+class EnvironmentMA():
+    def __init__(self):
+        self.agent_queue = []
+
+    def __del__(self):
+        del self.agent_queue
+
+    # 将agent的初始化放在环境之外进行
+    def join_agent(self, agent_list):
+        for ag in agent_list:
+            self.agent_queue.append(ag)
+
+    def reset(self):
+        for ag in self.agent_queue:
+            ag.reset()
+
+    def step(self, action_list):
+        self._update_environment(action_list)
+        next_united_state = self.get_united_state_feature()
+        rewards = self.get_united_reward()
+        done = False    # TODO: 这里done的判定还需要写
+        return next_united_state, rewards, done
+
+    def update_policy(self, central_replay_buffer):
+        for ag in self.agent_queue:
+            ag.update_model(central_replay_buffer, self.agent_queue)
+
+    def get_united_state_feature(self):
+        united_state = []
+        for ag in self.agent_queue:
+            state = self._get_state_feature(ag)
+            united_state.append(state)
+        united_state = np.concatenate(united_state, axis=0)
+        return united_state     # [s1, s2, ... sN]
 
 
-    # 点在多边形内部的射线检测
-    # point : 表示平面点坐标的 numpy ndarray
-    # polygon：表示平面多边形的顶点集合
-    def rt_test(self, point, polygon): 
-        _inside = False
-        # 判断多边形的顶点是否有效
-        if not isinstance(polygon, np.ndarray) or polygon.shape[1] != 2:
-            print("rt_test : arguments should be a numpy ndarray")
-            return
-
-        if not isinstance(point, np.ndarray) or point.shape[0] != 2:
-            print('rt_test : arguments should be a numpy ndarray')
-            return
-
-        _rows = polygon.shape[0]
-        for i in range(_rows):
-            _start, _end = polygon[i], polygon[(i+1)%_rows] 
-            radio_y = point[1]      # 以x轴的平行线作为射线
-            left_count , right_count = 0, 0
-
-            if((_start[1] - radio_y) * (_end[1] - radio_y) < 0):
-                slope = (_start[1] - _end[1]) / ((_start[0] - _end[1]) + pdata.EPSILON)
-                cross_x = (radio_y - _start[1]) / slope + _start[0]
-                if cross_x < point[0]:
-                    left_count += 1
-                elif cross_x > point[1]:
-                    right_count += 1
-
-        if left_count & 1 == 1 and right_count  & 1 == 1:
-            _inside = True
-
-        return _inside
-
-    # seg.shape = (2,2), rect_vtx.shape = (4, 2)
-    def _segment_test(self, seg, rect_vtx):
-        flag = False
-        delta = seg[0]  # delta:待移动的向量距离[x, y], 线段起点
-        seg_copy, rect_vtx_copy = seg, rect_vtx
-
-        # 平移
-        for i in range(0, len(seg_copy)):
-            seg_copy[i] -= delta
-        for i in range(0, len(rect_vtx_copy)):
-            rect_vtx_copy[i] -= delta
-
-        # 计算以segment为横轴的坐标系的非平移的基在原点坐标系中的表示
-        u_b_x = (seg_copy[1] - seg_copy[0]) / la.norm((seg_copy[1] - seg_copy[0]))  # u_x, u_y: 由线段确定的坐标系在原点坐标系中的基
-        u_b_y = np.matmul(geo.rotate90_mat, u_b_x)
-        base_b = np.array([u_b_x, u_b_y])  # 基底
-        base_b_reverse = la.inv(base_b)
-
-        # segment坐标系相对于原点的平移
-        translation_mat = np.array([[1, 0, seg_copy[0][0]], [0, 1, seg_copy[0][1]], [0, 0, 1]])
-        # 矩形顶点坐标（原点系）到segment坐标系的变换
-        for i in range(0, len(rect_vtx_copy)):
-            tmp = np.ndarray.tolist(rect_vtx_copy[i])
-            tmp.append(1)
-            tmp = np.array(tmp)   # [x, y, 1]
-            tmp = np.matmul(translation_mat, tmp)
-            tmp = tmp[0:2]  
-            rect_vtx_copy[i] = np.matmul(base_b_reverse, tmp)   # 得到 segment 坐标系下的坐标值
-
-        for i in range(0, len(rect_vtx_copy)):
-            seg_line = np.array([rect_vtx_copy[i], rect_vtx_copy[(i+1)%4]])
-            if seg_line[0][1] * seg_line[1][1] > 0:
-                continue    # 不相交
+    def _get_state_feature(self, agent):
+        rays = agent.get_rays()
+        state = np.ones(pdata.STATE_DIMENSION)
+        for i in range(0, len(rays)):
+            crosspoints = geo.get_seg_ray_crosspoints(rays[i], edges)                       
+            nearest = geo.get_nearest_distance(rays[i].s_point, crosspoints)
+            if nearest > pdata.OBSERVATION_LIMIT:
+                state[i] = pdata.OBSERVATION_LIMIT
             else:
-                x1, y1, x2, y2 = seg_line[0][0], seg_line[0][1], seg_line[1][0], seg_line[1][1]
-                x_p = y1 / (y2 - y1) * (x2 - x1) + x1   # 这里容易产生 Nan值
-                if x_p > 0 and x_p < seg_copy[1][1]:
-                    flag = True  # 线段相交
-                    return flag
-        return flag
+                state[i] = nearest
+            state[i] = state[i] / pdata.OBSERVATION_LIMIT   # Min-Max归一化
+
+        start_idx = pdata.STATE_DIMENSION - 4
+        agent_v, agent_des_local = agent.get_velocity(), agent.get_destination_local()
+        state[start_idx+0] = (agent_v[0] + agent.get_max_velocity()) / (2* agent.get_max_velocity())     # Min-Max归一化
+        state[start_idx+1] = (agent_v[1]+ agent.get_max_velocity()) / (2* agent.get_max_velocity())
+        state[start_idx+2] = (agent_des_local[0] + 2*(pdata.LANE_W + pdata.LANE_L)) / (4*(pdata.LANE_L + pdata.LANE_W))
+        state[start_idx+3] = (agent_des_local[1] + 2*(pdata.LANE_L+pdata.LANE_W)) / (4*(pdata.LANE_L + pdata.LANE_W))
+        return state
+
+
+    def _update_environment(self, actions):
+        for i in range(0, len(self.agent_queue)):
+            agent = self.agent_queue[i]
+            act = actions[i]
+            agent.update_attr(act)
+
+
+    # TODO：需要修改协作任务达成的判定
+    def get_united_reward(self):
+        united_reward = 0
+        for ag in self.agent_queue:
+            if isinstance(ag, vehicle):
+                reward = self._get_reward(ag)
+            elif isinstance(ag, pedestrian):
+                reward = self._get_reward_pe(ag)
+            united_reward = united_reward + reward
+        return united_reward
+
+
+    # shaped reward: 需要专家知识
+    def _get_reward(self, agent, goal=None):
+        reward = 0
+
+        # 主线奖励：进入目的地、进入与目的地不符的区域、发生车辆行人碰撞，都会采用主线奖励
+        if self._check_agent_collision(agent):
+            reward = -pdata.MAIN_REWARD
+            # self.logger.write_to_log('\n<agent collided>\n')
+            return reward
+        # elif not self._check_bound(agent):  # 包括越出仿真区域、开到左车道都会直接终止
+        #     reward = -5000
+        #     self.logger.write_to_log('<agent out of bound>')
+        #     return reward
+        elif self._check_arrival(agent):
+            reward = pdata.MAIN_REWARD
+            # self.logger.write_to_log('\n<agent arrived>\n')
+            return reward
+        elif self._check_outside_region(agent):
+            reward = -pdata.MAIN_REWARD
+            # self.logger.write_to_log('\n<agent out>\n')
+            return reward
+
+        # 接近奖励 —— 允许的最大速度的模也仅仅只有 0.69 m/frame
+        delta_d = la.norm(agent.get_last_position() - agent.get_destination_world()) - la.norm(agent.get_position() - agent.get_destination_world())
+        _r_d = 10 * delta_d
+
+        # 保持车道奖励
+        if self._check_bound(agent):
+            _r_lane_change = 10
+        else:
+            _r_lane_change = -10
+
+        # 速度奖励
+        velocity = agent.get_velocity()
+        norm_v = la.norm(velocity)
+
+        if isinstance(agent, motorVehicle):
+            v_limit = pdata.VELOCITY_LIMIT
+        elif isinstance(agent, Bicycle):
+            v_limit = pdata.MAX_BICYCLE_VEL
+
+        if  norm_v >= v_limit:
+            _r_v = -10 * (norm_v - v_limit)
+        elif norm_v:
+            # cos奖励 —— 当前速度与目标点重合方向越贴近，奖励越高
+            relative_pos = agent.get_destination_local()
+            unit = np.array([0.0, 1.0])
+            cosine = relative_pos.dot(unit) / (la.norm(relative_pos) + pdata.EPSILON)
+            _r_v = 10 * cosine + 10 * norm_v  
+        else:
+            _r_v = 0
+
+        # if isinstance(agent, MotorVehicle):     # 包导入路径的写法都会影响 isinstance()的准确性
+        #     print('Hello agent MotorVehicle.')
+
+        # elif isinstance(agent, NonMotorVehicle):
+        #     print('...')
+
+        # elif isinstance(agent, Pedestrian):
+        #     print('...')
+
+        # else:
+        #     print("Parameter agent has to be one of class MotorVehicle, NonMotorVehicle and Pedestrian.")
+
+        reward = _r_d + _r_v + _r_lane_change
+        # print('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity), file = pdata.EXPERIMENT_LOG)
+        # self.logger.write_to_log('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
+        # print('reward:' + str(reward))
+        return reward 
+
+
+    def _get_reward_pe(self, agent, goal=None):
+        reward = 0
+
+        # 主线奖励：进入目的地、进入与目的地不符的区域、发生车辆行人碰撞，都会采用主线奖励
+        if self._check_agent_collision(agent):
+            reward = -pdata.MAIN_REWARD
+            # self.logger.write_to_log('\n<agent collided>\n')
+            return reward
+        elif self._check_arrival(agent):
+            reward = pdata.MAIN_REWARD
+            # self.logger.write_to_log('\n<agent arrived>\n')
+            return reward
+        elif self._check_outside_region(agent):
+            reward = -pdata.MAIN_REWARD
+            # self.logger.write_to_log('\n<agent out>\n')
+            return reward
+
+        # 接近奖励 —— 允许的最大速度的模也仅仅只有 0.69 m/frame
+        delta_d = la.norm(agent.get_last_position() - agent.get_destination_world()) - la.norm(agent.get_position() - agent.get_destination_world())
+        _r_d = 10 * delta_d
+
+        # 速度奖励
+        velocity = agent.get_velocity()
+        norm_v = la.norm(velocity)
+        
+        if  norm_v >= pdata.MAX_HUMAN_VEL:
+            _r_v = -10 * (norm_v - pdata.MAX_HUMAN_VEL)
+        elif norm_v:
+            # cos奖励 —— 当前速度与目标点重合方向越贴近，奖励越高
+            relative_pos = agent.get_destination_local()
+            unit = np.array([0.0, 1.0])
+            cosine = relative_pos.dot(unit) / (la.norm(relative_pos) + pdata.EPSILON)
+            _r_v = 10 * cosine + 10 * norm_v  
+        else:
+            _r_v = 0
+
+        # if isinstance(agent, MotorVehicle):     # 包导入路径的写法都会影响 isinstance()的准确性
+        #     print('Hello agent MotorVehicle.')
+
+        # elif isinstance(agent, NonMotorVehicle):
+        #     print('...')
+
+        # elif isinstance(agent, Pedestrian):
+        #     print('...')
+
+        # else:
+        #     print("Parameter agent has to be one of class MotorVehicle, NonMotorVehicle and Pedestrian.")
+
+        reward = _r_d + _r_v
+        # print('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity), file = pdata.EXPERIMENT_LOG)
+        # self.logger.write_to_log('reward: {r}  velocity: {v}m/frame'.format(r = reward, v = velocity))
+        return reward 
+
+
+    # 检查是否终止
+    def _check_termination(self, reward):
+        if abs(reward) == pdata.MAIN_REWARD:
+            return True
+        else:
+            return False
+        
+
+    # Agent间的碰撞检查 —— SAT算法
+    def _check_agent_collision(self, agent):
+        collision = False
+        _count = 0
+
+        # 姑且采用暴力遍历方式检查相撞
+        _count = len(self.agent_queue)
+        for i in range(0, _count):
+            if agent == self.agent_queue[i]:
+                continue
+            elif self._check_bilateral_collision(agent, self.agent_queue):
+                collision = True
+        return collision
+
+
+    # 矩形间的碰撞检测 —— 由于存在斜交的可能性，直接比较线段
+    # TODO: 暴力遍历检查该怎么优化？
+    def _check_bilateral_collision(self, agent1, agent_set):
+        vertice1 = agent1.get_vertice()
+        for i in range(0, len(agent_set)):
+            vertice2 = agent_set[i].get_vertice()
+            if geo.check_obb_collision(vertice1, vertice2):
+                return True
+        return False
+
+
+    # 矩形是否行驶在合法区域内的碰撞检测 —— 顶点是否全部在合理行驶区域内
+    def _check_bound(self, agent):
+        # return False : if box is not inside the bound
+        vertice = agent.get_vertice()
+        _origin = agent.get_origin()
+        _des = agent.get_des_string()
+        if _origin == 'east' and _des == 'south':
+            return geo.box_inside_polygon(vertice, polygons['e_s'])
+        elif _origin == 'east' and _des == 'west':
+            return geo.box_inside_polygon(vertice, polygons['e_w'])
+        elif _origin == 'east' and _des == 'north':
+            return geo.box_inside_polygon(vertice, polygons['e_n'])  
+        elif _origin == 'north' and _des == 'east':
+            return geo.box_inside_polygon(vertice, polygons['n_e'])
+        elif _origin == 'north' and _des == 'south':
+            return geo.box_inside_polygon(vertice, polygons['n_s'])
+        elif _origin == 'north' and _des == 'west':
+            return geo.box_inside_polygon(vertice, polygons['n_w'])
+        elif _origin == 'west' and _des == 'south':
+            return geo.box_inside_polygon(vertice, polygons['w_s'])
+        elif _origin == 'west' and _des == 'east':
+            return geo.box_inside_polygon(vertice, polygons['w_e'])
+        elif _origin == 'west' and _des == 'north':
+            return geo.box_inside_polygon(vertice, polygons['w_n'])
+        elif _origin == 'south' and _des == 'east':
+            return geo.box_inside_polygon(vertice, polygons['s_e'])
+        elif _origin == 'south' and _des == 'north':
+            return geo.box_inside_polygon(vertice, polygons['s_n'])
+        elif _origin == 'south' and _des == 'west':
+            return geo.box_inside_polygon(vertice, polygons['s_w'])
+
+
+    # 对 vehicle 来说，穿越路口就是成功；对行人来说，到达马路对面才是成功
+    def _check_arrival(self, agent):
+        # return True: if agent arrived their destination
+        agent_cross = np.array([agent.get_position(),agent.get_last_position()])
+        if isinstance(agent, vehicle):
+            if agent.get_des_string() == 'south':
+                return geo.seg_seg_test(agent_cross, intersection_des_seg['s'])
+            elif agent.get_des_string() == 'east':
+                return geo.seg_seg_test(agent_cross, intersection_des_seg['e'])
+            elif agent.get_des_string() == 'north':
+                return geo.seg_seg_test(agent_cross, intersection_des_seg['n'])
+            elif agent.get_des_string() == 'west':
+                return geo.seg_seg_test(agent_cross, intersection_des_seg['w'])
+        if isinstance(agent, pedestrian):
+            if agent.get_origin_edge() == 0:
+                return geo.seg_seg_test(agent_cross, edges[7])
+            elif agent.get_origin_edge() == 1:
+                return geo.seg_seg_test(agent_cross, edges[2])
+            elif agent.get_origin_edge() == 2:
+                return geo.seg_seg_test(agent_cross, edges[1])
+            elif agent.get_origin_edge() == 3:
+                return geo.seg_seg_test(agent_cross, edges[4])
+            elif agent.get_origin_edge() == 4:
+                return geo.seg_seg_test(agent_cross, edges[4])
+            elif agent.get_origin_edge() == 5:
+                return geo.seg_seg_test(agent_cross, edges[6])
+            elif agent.get_origin_edge() == 6:
+                return geo.seg_seg_test(agent_cross, edges[5])
+            elif agent.get_origin_edge() == 7:
+                return geo.seg_seg_test(agent_cross, edges[0])
+            
+
+    # return True when agent's position is out of region
+    def _check_outside_region(self, agent):
+        pos = agent.get_position()
+        if pos[0] <= -pdata.LANE_W and pos[1] <= -pdata.LANE_W:
+            return True
+        elif pos[0] >= pdata.LANE_W and pos[1] <= -pdata.LANE_W:
+            return True
+        elif pos[0] >= pdata.LANE_W and pos[1] >= pdata.LANE_W:
+            return True
+        elif pos[0] <= -pdata.LANE_W and pos[1] >= pdata.LANE_W:
+            return True
+        elif pos[0] > (pdata.LANE_W + pdata.LANE_L) or pos[0] < (-pdata.LANE_L - pdata.LANE_W):
+            return True
+        elif pos[1] > (pdata.LANE_W + pdata.LANE_L) or pos[1] < (-pdata.LANE_L - pdata.LANE_W):
+            return True
+        return False
+
+    
+    # 返回单个步长内需要渲染的所有对象的顶点信息
+    def get_render_info(self):
+        info_list = []
+        # TODO: 后期加入非机动车、行人的更新代码
+        for i in range(0, len(self.agent_queue)):
+            vertice = self.agent_queue[i].get_vertice()
+            info_list.append(vertice)   # 不能直接往numpy数组里添加元素，要先使用python原生list
+
+        info_list = np.array(info_list)  
+        return info_list    

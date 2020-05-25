@@ -1,5 +1,3 @@
-import sys,os
-sys.path.append(os.getcwd() + '/traffic_model/RL_models')
 import copy
 import numpy as np 
 from numpy import linalg as la
@@ -7,6 +5,8 @@ import public_data as pdata
 import geometry as geo
 import DDPG as rl
 
+
+rotate_nag90_mat = np.array([[0.0, 1.0], [-1.0, 0.0]])
 
 # 行人仅有一种行为就是横穿马路
 class pedestrian():
@@ -123,7 +123,7 @@ class pedestrian():
             self._rays.append(copy.deepcopy(origin_ray))
 
 
-    def update_rays(self):
+    def _update_rays(self):
         unit_v = self._velocity / (la.norm(self._velocity) + pdata.EPSILON)  #[cosine, sine]
         tmp_ray = geo.ray(self._position, unit_v[0], unit_v[1])
         for i in range(0,12):
@@ -146,7 +146,9 @@ class pedestrian():
     def reset_agent(self):
         self.set_origin(self._edge, self._distance)
         self._vertice_in_world = self.calculate_vertice(self._position, self._origin_v)
-        self.update_rays()
+        self._update_destination_local()
+        self._update_rays()
+
 
     # 根据python的传参特性，这里必须保证返回的是一个拷贝值
     def get_position(self):
@@ -229,9 +231,16 @@ class pedestrian():
         pos_next = self._position + v_next 
         self._last_position = copy.deepcopy(self._position)
         self._set_position(pos_next)
+        self._update_destination_local()
+        self._update_rays()
         # tmp_str = 'Agent Position: {pos}'.format(pos = self._position)
         # self.logger.write_to_log(tmp_str)
         self.logger.record_position(self._position)
+
+    # 更新相对坐标
+    def _update_destination_local(self):  
+        relative_des_local = geo.world_to_local(self._position, self._velocity, self._destination_world)
+        self._destination_local = relative_des_local
 
 
     # 载入和保存模型参数的方式
@@ -250,11 +259,19 @@ class pedestrian():
         action = self.model.select_action(state)
         return action
 
+    def normalize_action(self, action):
+        if isinstance(action, np.ndarray) and self.check_2darray(action):
+            action = (action +  pdata.MAX_HUMAN_VEL) / (2 * pdata.MAX_HUMAN_VEL)
+
     def add_to_replaybuffer(self, state, next_state, action, reward, done):
+        self.normalize_action(action)
         self.model.replay_buffer.push((state, next_state, action, reward, done))
 
     def add_to_filter_repleybuffer(self, data_seq):
         # data_seq : [[next_state, state, action, reward, done]...]
+        for i in range(0, len(data_seq)):
+            action = data_seq[i][2]
+            self.normalize_action(action)
         self.model.replay_buffer.push(data_seq)
 
     def update_model(self):
@@ -262,3 +279,47 @@ class pedestrian():
 
     def get_buffer_storage(self):
         return self.model.replay_buffer.storage
+
+
+class PedestrianMA(pedestrian):
+    def __init__(self, logger): 
+        super().__init__(logger)
+
+    def update_model(self, central_replay_buffer, agent_list):
+        self.model.update(central_replay_buffer, agent_list)
+
+    def select_target_actions(self, states):
+        # state 的输入必须是归一化的[[],[]] np.ndarray
+        action = self.model.select_target_actions(states)
+        for act in action:
+            self.normalize_action(act)
+        return action   # 归一化的
+
+    def select_current_actions(self, states):
+        action = self.model.select_current_actions(states)
+        for act in action:
+            self.normalize_action(act)
+        return action   # 归一化的
+
+    def initiate(self, origin_edge, distance, agent_n):
+        self.set_origin(origin_edge, distance)
+        self._origin_edge = origin_edge
+        self._distance_to_intersection = distance
+        self.set_rays()
+        self._vertice_in_world = self.calculate_vertice(self._position, self._origin_v)
+        self.enter_frame = 0
+        self.model = rl.MADDPG_PE(pdata.STATE_DIMENSION, pdata.ACTION_DIMENSION, pdata.MAX_HUMAN_VEL, agent_n, self.logger)
+
+    def reset(self):
+        self.set_origin(self._origin_edge, self._distance_to_intersection)
+        self._vertice_in_world = self.calculate_vertice(self._position, self._origin_v)
+        self._update_destination_local()
+        self._update_rays()
+
+    def save(self):
+        # self.logger.write_to_log('Bicycle: .pth to be saved...')
+        self.model.save(pdata.AGENT_TUPLE[2]+'_MA')
+
+    def load(self):
+        # self.logger.write_to_log('Bicycle: .pth to be loaded...')
+        self.model.load(pdata.AGENT_TUPLE[2]+'_MA') 

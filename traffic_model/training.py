@@ -58,7 +58,7 @@ class motor_train_process_HER(threading.Thread):
 
                 for t in count():
                     state_her = np.concatenate([state, final_goal], axis = 0)
-                    action = self.agent.select_action(state_her)
+                    action = self.agent.select_action(state_her)    
 
                     # issue 3 add noise to action 
                     noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_SD)])
@@ -200,7 +200,6 @@ class motor_train_filter_process(threading.Thread):
             for i in range(pdata.MAX_EPISODE):
                 data_seq = []
                 state = self.roads.reset(self.agent)      # state 的维数要尤其注意
-                counter = counter + 1
 
                 # count(): an infinite iterator provided by module itertools
                 # 用于往经验池中放入样本的内层循环
@@ -236,11 +235,11 @@ class motor_train_filter_process(threading.Thread):
                 self.agent.add_to_filter_repleybuffer(data_seq)
                 self.logger.add_to_position_seq()
 
-            if len(self.agent.get_buffer_storage()) >= pdata.CAPACITY:
-                counter = counter + 1
-                if i % pdata.LOG_INTERVAL == 0:
-                    self.agent.save()
-                self.agent.update_model()  # 更新
+                if len(self.agent.get_buffer_storage()) >= pdata.CAPACITY:
+                    counter = counter + 1
+                    if i % pdata.LOG_INTERVAL == 0:
+                        self.agent.save()
+                    self.agent.update_model()  # 更新
 
         print('实际训练次数：'+str(counter))               
         self.logger.record() 
@@ -324,8 +323,9 @@ if __name__ == '__main__':
     # p_pe_ver_left_down = PedestrianTrainProcess(1, 2.0, 2) #南部路口通行
 
     # timer1 = Timer(pdata.SLEEP_TIME, p_pe_ver_left_down.logger.clear_buffer)
+    timer_straight = Timer(pdata.SLEEP_TIME, p_straight_filter.logger.clear_buffer)
     # timer2 = Timer(pdata.SLEEP_TIME, p_left_2.logger.clear_buffer)
-    timer2 = Timer(pdata.SLEEP_TIME, p_straight_filter.logger.clear_buffer)
+    # timer2 = Timer(pdata.SLEEP_TIME, p_left_1_fitler.logger.clear_buffer)
 
     # p_straight.start()
     p_straight_filter.start()
@@ -339,7 +339,8 @@ if __name__ == '__main__':
     # p_pe_ver_left_down.start()
 
     # timer1.start()
-    timer2.start()
+    timer_straight.start()
+    # timer2.start()
 
     # p_straight.join()
     p_straight_filter.join()

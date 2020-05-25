@@ -1,5 +1,3 @@
-import sys,os
-sys.path.append(os.getcwd() + '/traffic_model/RL_models')
 import copy,math
 import numpy as np 
 from numpy import linalg as la
@@ -44,6 +42,7 @@ south_transform_mat = np.array([
 
 # rotate90_mat = np.array([[0, -1],[1, 0]])
 # rotate30_mat = np.array([[np.cos(np.pi/6), -1/2],[1/2, np.cos(np.pi/6)]])
+rotate_nag90_mat = np.array([[0.0, 1.0], [-1.0, 0.0]])
 
 class vehicle(object):
     # _property属性：类属性，可由该类的不同实例共享和改写，单下划线表明仅有类的实例及其子类实例可以访问
@@ -159,7 +158,7 @@ class vehicle(object):
         elif self._origin == 'south':
             destination = np.matmul(south_transform_mat, destination)
 
-        self._destination_world = destination[0:2]    # 丢弃坐标运算添加的最后一个元素
+        self._destination_world = destination[0:2] 
         # print('destination position: {des}'.format(des = self._destination))
         # self.logger.write_to_log('destination position in local: {des}'.format(des = self._destination_local))
 
@@ -173,7 +172,7 @@ class vehicle(object):
             self._rays.append(copy.deepcopy(origin_ray))
 
 
-    def update_rays(self):
+    def _update_rays(self):
         unit_v = self._velocity / (la.norm(self._velocity) + pdata.EPSILON)  #[cosine, sine]
         tmp_ray = geo.ray(self._position, unit_v[0], unit_v[1])
         for i in range(0,12):
@@ -204,8 +203,10 @@ class vehicle(object):
     def reset_agent(self):
         self.set_origin(self._origin)
         self.set_veer( self._veer)
-        self.update_rays()
         self._vertice_in_world = self.calculate_vertice(self._position, self._velocity)
+        self._update_rays()
+        self._update_destination_local()
+
 
     # 根据python的传参特性，这里必须保证返回的是一个拷贝值
     def get_position(self):
@@ -326,6 +327,7 @@ class vehicle(object):
 
     # 由加速度更新 Agent 的属性
     def update_attr(self, action):
+        # action: 未归一化的
         v_next = self.get_updated_velocity(action)
 
         if len(v_next) == 0:
@@ -343,7 +345,7 @@ class vehicle(object):
         # self.logger.write_to_log(tmp_str)
         self._vertice_in_world = self.calculate_vertice(pos_next, v_next)
         self._update_destination_local()
-        self.update_rays()
+        self._update_rays()
 
     
     # 将局部坐标系内的顶点，由 pos（决定平移） 和 vec（决定朝向）计算出在世界坐标系下的坐标 
@@ -370,8 +372,9 @@ class vehicle(object):
 
 
     # 更新相对坐标
-    def _update_destination_local(self):
-        self._destination_local = self._destination_world - self._position
+    def _update_destination_local(self):  
+        relative_des_local = geo.world_to_local(self._position, self._velocity, self._destination_world)
+        self._destination_local = relative_des_local
 
 
     # 载入和保存模型参数的方式
@@ -379,11 +382,9 @@ class vehicle(object):
         # self.logger.write_to_log('.pth to be loaded...')
         self.model.load('')
 
-
     def save(self):
         # self.logger.write_to_log('.pth to be saved...')
         self.model.save('')
-
 
     # return numpy array
     def select_action(self, state):
@@ -419,6 +420,24 @@ class motorVehicle(vehicle):
     def get_max_velocity(self):
         return pdata.MAX_VELOCITY
 
+    def normalize_action(self, action):
+        if isinstance(action, np.ndarray) and self.check_2darray(action):
+            action[0] = (action[0] + pdata.MAX_MOTOR_ACTION[0]) / (2 * pdata.MAX_MOTOR_ACTION[0])
+            action[1] = (action[1] + pdata.MAX_MOTOR_ACTION[1]) / (2 * pdata.MAX_MOTOR_ACTION[1])
+
+    def add_to_replaybuffer(self, state, next_state, action, reward, done):
+        # action normalization [-1, 1]
+        self.normalize_action(action)
+        self.model.replay_buffer.push((state, next_state, action, reward, done))
+
+    def add_to_filter_repleybuffer(self, data_seq):
+        # data_seq : [[next_state, state, action, reward, done]...]
+        for i in range(0, len(data_seq)):
+            action = data_seq[i][2]
+            self.normalize_action(action)
+        self.model.replay_buffer.push(data_seq)
+
+
     def save(self):
         # self.logger.write_to_log('Motor : .pth to be saved...')
         self.model.save(pdata.AGENT_TUPLE[0]+'_'+self._origin+'_'+self._veer)
@@ -435,6 +454,58 @@ class motorVehicle(vehicle):
         self.model.load(mark_name)
 
 
+class MotorVehicleMA(motorVehicle):
+    def __init__(self, logger):
+        super().__init__(logger)
+
+    def update_model(self, central_replay_buffer, agent_list):
+        self.model.update(central_replay_buffer, agent_list)
+
+    def select_target_actions(self, states):
+        # state 的输入必须是归一化的[[],[]] np.ndarray
+        action = self.model.select_target_actions(states)
+        for act in action:
+            self.normalize_action(act)
+        return action   # 归一化的
+
+    def select_current_actions(self, states):
+        action = self.model.select_current_actions(states)
+        for act in action:
+            self.normalize_action(act)
+        return action   # 归一化的
+
+    # 按照传入的参数对agent进行初始化
+    def initiate(self, world_origin_pos, world_des_pos, vel, des_str, agent_n):
+        # world_origin_pos: agent初始位置（原点坐标）
+        # world_des_pos：agent目的地位置（目的坐标）
+        # vel：agent的初始速度 
+        # des_str：决定使用哪条终点线
+        self._set_position(world_origin_pos)
+        self._set_velocity(vel)
+        self._origin_v = copy.deepcopy(vel)
+        self._origin_pos = copy.deepcopy(world_origin_pos)    # 新增的类属性
+        self._destination_local = geo.world_to_local(world_origin_pos, vel, world_des_pos)
+        self._destination_world = copy.deepcopy(world_des_pos)
+        self.set_rays()
+        self._vertice_in_world = self.calculate_vertice(self._position, self._velocity)
+        self._des_string = des_str      # 必须是 'south' 'east' 'north' 'west' 的一种
+        self.model = rl.MADDPG(pdata.STATE_DIMENSION, pdata.ACTION_DIMENSION, pdata.MAX_MOTOR_ACTION, agent_n, self.logger)
+
+    def reset(self):
+        self._position = copy.deepcopy(self._origin_pos)
+        self._velocity = copy.deepcopy(self._origin_v)
+        self._update_rays()
+        self._vertice_in_world = self.calculate_vertice(self._position, self._velocity)
+
+    def save(self):
+        # self.logger.write_to_log('Bicycle: .pth to be saved...')
+        self.model.save(pdata.AGENT_TUPLE[0]+'_MA')
+
+    def load(self):
+        # self.logger.write_to_log('Bicycle: .pth to be loaded...')
+        self.model.load(pdata.AGENT_TUPLE[0]+'_MA') 
+
+
 class Bicycle(vehicle):
     def __init__(self, logger):
         super().__init__(logger)
@@ -444,6 +515,23 @@ class Bicycle(vehicle):
         [-pdata.NON_MOTOR_L/2, -pdata.NON_MOTOR_W/2]])
         self._width = pdata.NON_MOTOR_W
         self._length = pdata.NON_MOTOR_L
+
+    def normalize_action(self, action):
+        if isinstance(action, np.ndarray) and self.check_2darray(action):
+            action[0] = (action[0] + pdata.MAX_BICYCLE_ACTION[0]) / (2 * pdata.MAX_BICYCLE_ACTION[0])
+            action[1] = (action[1] + pdata.MAX_BICYCLE_ACTION[1]) / (2 * pdata.MAX_BICYCLE_ACTION[1])
+
+    def add_to_replaybuffer(self, state, next_state, action, reward, done):
+        # action normalization [-1, 1]
+        self.normalize_action(action)
+        self.model.replay_buffer.push((state, next_state, action, reward, done))
+
+    def add_to_filter_repleybuffer(self, data_seq):
+        # data_seq : [[next_state, state, action, reward, done]...]
+        for i in range(0, len(data_seq)):
+            action = data_seq[i][2]
+            self.normalize_action(action)
+        self.model.replay_buffer.push(data_seq)
 
     def get_max_velocity(self):
         return pdata.MAX_BICYCLE_VEL
@@ -459,4 +547,54 @@ class Bicycle(vehicle):
     def load_from(self, mark_name):
         self.model.load(mark_name)
 
-        
+    
+class BicycleMA(Bicycle):
+    def __init__(self, logger):
+        super().__init__(logger)
+
+    def update_model(self, central_replay_buffer, agent_list):
+        self.model.update(central_replay_buffer, agent_list)
+
+    def select_target_actions(self, states):
+        # state 的输入必须是归一化的[[],[]] np.ndarray
+        action = self.model.select_target_actions(states)
+        for act in action:
+            self.normalize_action(act)
+        return action   # 归一化的
+
+    def select_current_actions(self, states):
+        action = self.model.select_current_actions(states)
+        for act in action:
+            self.normalize_action(action)
+        return action   # 归一化的
+
+    # 按照传入的参数对agent进行初始化
+    def initiate(self, world_origin_pos, world_des_pos, vel, des_str, agent_n):
+        # world_origin_pos: agent初始位置（原点坐标）
+        # world_des_pos：agent目的地位置（目的坐标）
+        # vel：agent的初始速度 
+        # des_str：决定使用哪条终点线
+        self._set_position(world_origin_pos)
+        self._set_velocity(vel)
+        self._origin_v = copy.deepcopy(vel)
+        self._origin_pos = copy.deepcopy(world_origin_pos)    # 新增的类属性
+        self._destination_local = geo.world_to_local(world_origin_pos, vel, world_des_pos)
+        self._destination_world = copy.deepcopy(world_des_pos)
+        self.set_rays()
+        self._vertice_in_world = self.calculate_vertice(self._position, self._velocity)
+        self._des_string = des_str      # 必须是 'south' 'east' 'north' 'west' 的一种
+        self.model = rl.MADDPG(pdata.STATE_DIMENSION, pdata.ACTION_DIMENSION, pdata.MAX_BICYCLE_ACTION, agent_n, self.logger)
+
+    def reset(self):
+        self._position = copy.deepcopy(self._origin_pos)
+        self._velocity = copy.deepcopy(self._origin_v)
+        self._update_rays()
+        self._vertice_in_world = self.calculate_vertice(self._position, self._velocity)
+
+    def save(self):
+        # self.logger.write_to_log('Bicycle: .pth to be saved...')
+        self.model.save(pdata.AGENT_TUPLE[1]+'_MA')
+
+    def load(self):
+        # self.logger.write_to_log('Bicycle: .pth to be loaded...')
+        self.model.load(pdata.AGENT_TUPLE[1]+'_MA') 

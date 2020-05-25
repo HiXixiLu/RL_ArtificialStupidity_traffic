@@ -33,14 +33,14 @@ STATE_DIMENSION = OBSERVATION_DIMENSION + 4    # 见毕业论文
 STATE_HER_DIMENSION = STATE_DIMENSION + 2   # 2: 作为 goal 的position维度
 ACTION_DIMENSION = 2
 MAIN_REWARD = 300
-EPSILON = 1e-6
+EPSILON = 1e-8
 
 TAU = 0.005     # target smoothing coefficient：从current网络往target网络里更新参数用
 TARGET_UPDATE_INTERVAL = 1
 TEST_ITERATION = 10
 LEARNING_RATE = 1e-3     # 0.001的学习率
 GAMMA = 0.99    # discounted factor
-CAPACITY = 20000   # replay buffer size
+CAPACITY = 20   # replay buffer size
 BATCH_SIZE = 64  # minimun batch size
 SEED = False
 RANDOM_SEED = 9527
@@ -56,8 +56,8 @@ ANGLE_SD = (EXPLORATION_NOISE * np.pi/2) / 2.576     # 正态分布的标准差�
 NORM_SD = MAX_ACCELERATION / 2.576  # 正态分布的标准差σ：满足 X~N(0, σ^2) 使上α分位点在 0.2 * MAX_ACCELERATION，其中α=0.005
 HUMAN_SD = (EXPLORATION_NOISE * MAX_HUMAN_VEL) / 2.576  # 人类速度标准差
 
-MAX_EPISODE =  20000 # num of games —— 进行迭代的次数，但其中有一部分无效计算时间是用于填满样本池的
-MAX_TRAINING_EPOCH = 2000  # num of traning batch: 实际训练次数
+MAX_EPISODE =  250 # num of games —— 进行迭代的次数，但其中有一部分无效计算时间是用于填满样本池的
+# MAX_TRAINING_EPOCH = 2000  # num of traning batch: 实际训练次数
 MAX_LENGTH_OF_TRAJECTORY = 200    # num of frames —— 单次训练最大序列长度
 PRINT_LOG = 5
 UPDATE_ITERATION = 10   # 一次网络参数更新的均值计算次数
@@ -67,4 +67,4 @@ HER_K = 8   # 1/8 of BATCH_SIZE
 DIRECTORY = os.getcwd() +'/traffic_model/data/'  # python文件路径可处理适应于不同系统 
 
 ''' 定时任务 '''
-SLEEP_TIME = 60*20   # s
+SLEEP_TIME = 20*60   # seconds

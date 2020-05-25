@@ -1,8 +1,8 @@
-import os,sys,time,copy
-sys.path.append(os.getcwd() + '/traffic_model/RL_models')     # 在sys.path里动态添加了路径后，python才能找到项目中的模块
+import time,copy
 import threading
 import public_data as pdata
 import pandas
+import numpy as np
 
 
 ''' 文件的保存路径 '''
@@ -68,7 +68,8 @@ class logWriter():
 
     def record_position(self, pos):
         # pos: numpy.ndarray
-        self._tmp_seq.append(copy.deepcopy(pos))
+        tmp = np.around(pos, decimals=2)
+        self._tmp_seq.append(tmp)
 
     def add_to_critic_buffer(self, num):
         self._critic_loss.append(num)
@@ -81,12 +82,14 @@ class logWriter():
         # 参数文件
         txt_file = open(DIRECTORY + self._file_name +'_params.txt', 'a')
         txt_file.write('\n--------------END TIME: '+ time.strftime("%m-%d_%H-%M", time.localtime(time.time())) + '---------------------')
-        txt_file.close()
+        txt_file.close()    
 
         # loss表格
         data_frame = pandas.DataFrame({'critic_loss':self._critic_loss, 'actor_loss':self._actor_loss})
-        data_frame.to_csv(DIRECTORY + self._file_name + '_loss.csv', index=False)   # 有一个seq参数，如果不指定，则默认分割符为','
-
+        data_frame.to_csv(DIRECTORY + self._file_name + '_loss' + str(self.loss_counter) + '.csv', index=False)   # 有一个seq参数，如果不指定，则默认分割符为','
+        self._critic_loss.clear()
+        self._actor_loss.clear()
+        
         # 路径点序列
         txt_file = open(DIRECTORY + self._file_name  + '_positions' + str(self.position_counter) + '.txt', 'w')
         txt_file.write('position sequences:')
@@ -97,6 +100,8 @@ class logWriter():
             ss = ss[:-1]
             txt_file.write('\n'+ ss)
         txt_file.close()
+        self._position_seq.clear()
+        self.position_counter = self.position_counter + 1
 
 
     def record_pe(self):

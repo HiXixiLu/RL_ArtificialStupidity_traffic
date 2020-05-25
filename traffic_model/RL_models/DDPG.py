@@ -1,6 +1,5 @@
 from itertools import count
-import os, sys, random, copy
-sys.path.append(os.getcwd() + '/traffic_model/RL_models')
+import random, copy, os
 import numpy as np
 import numpy.linalg as la
 import torch
@@ -9,289 +8,17 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Normal
 # from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 import public_data as pdata  #相对路径问题
+from network import Actor, ActorHER, ActorPedestrian, ActorPedestrianHER,Critic,CriticHER,CriticPedestrian,CriticPedestrianHER,CriticCentral,CriticCentralPE
+from replaybuffer import Replay_buffer, Replay_buffer_HER, FilterReplayBuffer
 
 '''
 Implementation of Deep Deterministic Policy Gradients (DDPG) with pytorch 
 riginal paper: https://arxiv.org/abs/1509.02971
-Not the author's implementation !
+Not the author's implementation !  
 '''
-
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-class Replay_buffer():
-    '''
-    Code based on:
-    https://github.com/openai/baselines/blob/master/baselines/deepq/replay_buffer.py
-    Expects tuples of (state, next_state, action, reward, done)
-    '''
-    def __init__(self, max_size=pdata.CAPACITY):
-        self.storage = []
-        self.max_size = max_size
-        self.ptr = 0
-
-    def push(self, data):
-        if len(self.storage) == self.max_size:
-            # 经验回放池的超限更新策略
-            self.storage[int(self.ptr)] = data
-            self.ptr = (self.ptr + 1) % self.max_size       #循环数组更新
-        else:
-            self.storage.append(data)
-
-    def sample(self, batch_size):
-        ind = np.random.randint(0, len(self.storage), size=batch_size)  # 在 0 到 len(self.storage) 之间产生 size 个数
-        x, y, u, r, d = [], [], [], [], []
-
-        # 这里的样本是完全随机的64个
-        for i in ind:
-            X, Y, U, R, D = self.storage[i]
-            x.append(np.array(X, copy=False))
-            y.append(np.array(Y, copy=False))
-            u.append(np.array(U, copy=False))
-            r.append(np.array(R, copy=False))
-            d.append(np.array(D, copy=False))
-
-        return np.array(x), np.array(y), np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1)
-
-
-class Replay_buffer_HER():
-    def __init__(self, max_size=pdata.CAPACITY):
-        self.storage = []
-        self.max_size = max_size
-        self.ptr = 0
-
-    def push(self, data):
-        if len(self.storage) == self.max_size:
-            # 经验回放池的超限更新策略
-            self.storage[int(self.ptr)] = data
-            self.ptr = (self.ptr + 1) % self.max_size       #循环数组更新
-        else:
-            self.storage.append(data)
-
-    def sample(self, batch_size):
-        ind = np.random.randint(0, len(self.storage), size= pdata.HER_K)  # 在 0 到 len(self.storage) 之间产生 size 个数
-        x, y, u, r, d = [], [], [], [], []
-
-        # 这里的样本是完全随机的batch_size个
-        for i in ind:
-            X, Y, U, R, D = self.storage[i]
-            X_HER, Y_HER, U_HER, R_HER, D_HER = self.storage[(i+1) % self.max_size] 
-            x.append(np.array(X, copy=False)), x.append(np.array(X_HER, copy=False))
-            y.append(np.array(Y, copy=False)), y.append(np.array(Y_HER, copy=False))
-            u.append(np.array(U, copy=False)), u.append(np.array(U_HER, copy=False))
-            r.append(np.array(R, copy=False)), r.append(np.array(R_HER, copy=False))
-            d.append(np.array(D, copy=False)), d.append(np.array(D_HER, copy=False))
-
-        for i in range(2*pdata.HER_K, batch_size):
-            X, Y, U, R, D = self.storage[i]
-            x.append(np.array(X, copy=False))
-            y.append(np.array(Y, copy=False))
-            u.append(np.array(U, copy=False))
-            r.append(np.array(R, copy=False))
-            d.append(np.array(D, copy=False))
-
-        return np.array(x), np.array(y), np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1)
-
-
-class FilterReplayBuffer():
-    def __init__(self, max_size=pdata.CAPACITY):
-        self.storage = []
-        self.max_size = max_size 
-        self.ptr = 0
-        self.max_size
-
-    def sample(self, batch_size):
-        ind = np.random.randint(0, len(self.storage), size= pdata.HER_K)  # 在 0 到 len(self.storage) 之间产生 size 个数
-        x, y, u, r, d = [], [], [], [], []
-
-        # 这里的样本是完全随机的batch_size个
-        for i in ind:
-            X, Y, U, R, D = self.storage[i]
-            X_HER, Y_HER, U_HER, R_HER, D_HER = self.storage[(i+1) % self.max_size] 
-            x.append(np.array(X, copy=False)), x.append(np.array(X_HER, copy=False))
-            y.append(np.array(Y, copy=False)), y.append(np.array(Y_HER, copy=False))
-            u.append(np.array(U, copy=False)), u.append(np.array(U_HER, copy=False))
-            r.append(np.array(R, copy=False)), r.append(np.array(R_HER, copy=False))
-            d.append(np.array(D, copy=False)), d.append(np.array(D_HER, copy=False))
-
-        for i in range(2*pdata.HER_K, batch_size):
-            X, Y, U, R, D = self.storage[i]
-            x.append(np.array(X, copy=False))
-            y.append(np.array(Y, copy=False))
-            u.append(np.array(U, copy=False))
-            r.append(np.array(R, copy=False))
-            d.append(np.array(D, copy=False))
-
-        return np.array(x), np.array(y), np.array(u), np.array(r).reshape(-1, 1), np.array(d).reshape(-1, 1)
-
-    # 增加筛选机制 —— 最长递增子序列
-    def push(self, data_seq):
-        # data_seq : [[next_state, state, action, reward, done]...]
-        longest_subseq = []
-        for i in range(0, len(data_seq)):
-            tmp_seq = []    # 保存索引号
-            tmp_seq.append(i)
-            for j in range(i+1, len(data_seq)):
-                if data_seq[j][3] > data_seq[len(tmp_seq)-1][3]:
-                    tmp_seq.append(j)
-            if len(longest_subseq) < len(tmp_seq):
-                longest_subseq = copy.deepcopy(tmp_seq)
-
-        for i in range(0, len(longest_subseq)):
-            self._push((data_seq[i][0], data_seq[i][1], data_seq[i][2], data_seq[i][3], data_seq[i][4]))
-
-    # 真正放入经验池的机制
-    def _push(self, data_tuple):
-        if len(self.storage) == self.max_size:
-            # 经验回放池的超限更新策略
-            self.storage[int(self.ptr)] = data_tuple
-            self.ptr = (self.ptr + 1) % self.max_size       #循环数组更新
-        else:
-            self.storage.append(data_tuple)
-
-
-
-# 行动器 —— 继承自 nn.Module，则必须覆盖的函数有 __init__ 和 forward
-# 在Actor-Critic 框架中， Actor用于输出动作（不管是输出概率性的离散动作，还是动作以策略网络的形式输出）
-# 因此在 Actor网络中，输入是 state-vector ，输出是 action-vector
-class Actor(nn.Module):
-    def __init__(self, state_dim, action_dim, max_action):
-        # max_action: 用于限制神经网络的输出，既然与 Tensor对象一起作为操作数，则必须保证 max_action 也为Tensor
-        super(Actor, self).__init__()   # 这里的写法是为了调用父类的构造函数
-
-        """ 三层的全连接神经网络 —— 真正神经网络的部分反而很简单 """
-        self.l1 = nn.Linear(state_dim, 100)
-        self.l2 = nn.Linear(100, 75)
-        self.l3 = nn.Linear(75, action_dim)
-        self.max_action = torch.FloatTensor(max_action.reshape(1, -1)).to(device) 
-
-    # forward 是神经网络每一次调用时用来计算输出的 —— 必须保证输入是个 torch.Tensor
-    def forward(self, x):
-        # self.l1 对象为 nn.Linear对象
-        # input shape: (N, *, in_features) where * means any number of additional dimensions
-        # output shape: (N, *, out_features) where all but the last dimension are the same shape as the input
-        x = F.relu(self.l1(x))  
-        x = F.relu(self.l2(x))
-        x = self.l3(x)
-        # torch.tanh() 利用双曲正切函数对输出tensor中的每一个元素进行了tanh的归一化计算
-        # max_action : 用来限制输出每个维度范围的向量
-        x = self.max_action * torch.tanh(x)
-        return x
-
-
-class ActorHER(nn.Module):
-    def __init__(self, her_state_dim, action_dim, max_action):
-        super(ActorHER, self).__init__() 
-        self.l1 = nn.Linear(her_state_dim, 100) # eev_state + pos_goal 的拼接维度
-        self.l2 = nn.Linear(100, 75)
-        self.l3 = nn.Linear(75, action_dim)
-        self.max_action = torch.FloatTensor(max_action.reshape(1, -1)).to(device) 
-
-    def forward(self, x):
-        x = F.relu(self.l1(x))  
-        x = F.relu(self.l2(x))
-        x = self.l3(x)
-        x = self.max_action * torch.tanh(x)
-        return x
-
-
-class ActorPedestrian(nn.Module):
-    def __init__(self, state_dim, action_dim, max_vel):
-        super(ActorPedestrian, self).__init__()
-        self.l1 = nn.Linear(state_dim, 50)
-        self.l2 = nn.Linear(50, 30)
-        self.l3 = nn.Linear(30, action_dim)
-        self.max_velocity = max_vel
-
-    def forward(self, x):
-        x = F.relu(self.l1(x))
-        x = F.relu(self.l2(x))
-        x = self.l3(x)  # 一个速度矢量
-        ratio = self.max_velocity / (torch.norm(x) + pdata.EPSILON)
-        if ratio < 1:
-            x = x * ratio
-        return x
-
-class ActorPedestrianHER(nn.Module):
-    def __init__(self, her_state_dim, action_dim, max_vel):
-        super(ActorPedestrianHER, self).__init__() 
-        self.l1 = nn.Linear(her_state_dim, 50) # env_state + pos_goal 的拼接维度
-        self.l2 = nn.Linear(50, 30)
-        self.l3 = nn.Linear(30, action_dim)
-        self.max_velocity = max_vel
-
-    def forward(self, x):
-        x = F.relu(self.l1(x))
-        x = F.relu(self.l2(x))
-        x = self.l3(x)  # 一个速度矢量
-        ratio = self.max_velocity / (torch.norm(x) + pdata.EPSILON)
-        if ratio < 1:
-            x = x * ratio
-        return x
-
-
-# 评价器 ：作用就是输出 Q(s, a) 的估计
-# 也因此，在 Actor-Critic 框架中，Critic的输入元一定是 state-vector with action-vector
-class Critic(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(Critic, self).__init__()
-
-        """ 还是三层的全连接神经网络 """ 
-        ''' what's the meaning of actions were not included until the hidden layer of Q '''
-        self.l1 = nn.Linear(state_dim + action_dim, 100)    # 输入是 state 和 action 的重组向量
-        self.l2 = nn.Linear(100, 75)
-        self.l3 = nn.Linear(75, 1)     # 没有激活函数 —— 因为Critic网络本身就是输出价值的，不需要归一化
-
-    def forward(self, x, u):
-        # x = F.relu(self.l1(torch.cat([x, u], 1)))   # torch.cat(seq, dim, out=None)
-        x = F.relu(self.l1(torch.cat((x, u),1)))  # torch.cat() 只能 concatenate 相同 shape 的 tensor
-        x = F.relu(self.l2(x))
-        x = self.l3(x)
-        return x
-
-
-class CriticHER(nn.Module):
-    def __init__(self, her_state_dim, action_dim):
-        super(CriticHER, self).__init__()
-        self.l1 = nn.Linear(her_state_dim + action_dim, 100)    # 输入是 state，position 和 action 的重组向量
-        self.l2 = nn.Linear(100, 75)
-        self.l3 = nn.Linear(75, 1)
-
-    def forward(self, x, u):
-        x = F.relu(self.l1(torch.cat((x, u),1)))  # x: state||goal , u: action
-        x = F.relu(self.l2(x))
-        x = self.l3(x)
-        return x
-
-
-class CriticPedestrian(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(CriticPedestrian, self).__init__()
-        self.l1 = nn.Linear(state_dim + action_dim, 50)    # 输入是 state，position 和 action 的重组向量
-        self.l2 = nn.Linear(50, 30)
-        self.l3 = nn.Linear(30, 1)
-
-    def forward(self, x, u):
-        x = F.relu(self.l1(torch.cat((x, u),1)))  # x: state||goal , u: action
-        x = F.relu(self.l2(x))
-        x = self.l3(x)
-        return x
-
-
-class CriticPedestrianHER(nn.Module):
-    def __init__(self, her_state_dim, action_dim):
-        super(CriticPedestrianHER, self).__init__()
-        self.l1 = nn.Linear(her_state_dim + action_dim, 50)
-        self.l2 = nn.Linear(50, 30)
-        self.l3 = nn.Linear(30, 1)
-
-    def forward(self, x, u):
-        x = F.relu(self.l1(torch.cat((x, u),1)))  # torch.cat() 只能 concatenate 相同 shape 的 tensor
-        x = F.relu(self.l2(x))
-        x = self.l3(x)
-        return x
-
 
 # 一个 DDPG 实例对应一个 agent
 # TODO：完成与自己项目相关的修改
@@ -305,20 +32,20 @@ class DDPG(object):
     def __init__(self, state_dim, action_dim, max_action, origin_str, veer_str, logger):
 
         # 存在于 GPU 的神经网络
-        self.actor = Actor(state_dim, action_dim, max_action).to(device)    # origin_network
-        self.actor_target = Actor(state_dim, action_dim, max_action).to(device)    # target_network
+        self.actor = Actor(state_dim, action_dim, max_action).to(self.device)    # origin_network
+        self.actor_target = Actor(state_dim, action_dim, max_action).to(self.device)    # target_network
         self.actor_target.load_state_dict(self.actor.state_dict())  # initiate actor_target with actor's parameters
         # pytorch 中的 tensor 默认requires_grad 属性为false，即不参与梯度传播运算，特别地，opimizer中模型参数是会参与梯度优化的
         self.actor_optimizer = optim.Adam(self.actor.parameters(), pdata.LEARNING_RATE) # 以pdata.LEARNING_RATE指定学习率优化actor中的参数 
 
-        self.critic = Critic(state_dim, action_dim).to(device)
-        self.critic_target = Critic(state_dim, action_dim).to(device)
+        self.critic = Critic(state_dim, action_dim).to(self.device)
+        self.critic_target = Critic(state_dim, action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), pdata.LEARNING_RATE)
 
         # self.replay_buffer = Replay_buffer()    # initiate replay-buffer
         self.replay_buffer = FilterReplayBuffer()
-        # self.writer = SummaryWriter(pdata.DIRECTORY)
+        self.writer = SummaryWriter(pdata.DIRECTORY+'runs')
         self.num_critic_update_iteration = 0
         self.num_actor_update_iteration = 0
         self.num_training = 0
@@ -330,7 +57,7 @@ class DDPG(object):
 
 
     def select_action(self, state):
-        state = torch.FloatTensor(state.reshape(1, -1)).to(device)
+        state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
         # numpy.ndarray.flatten(): 返回一个 ndarray对象的copy，并且将该ndarray压缩成一维数组
         action = self.actor(state).cpu().data.numpy().flatten()
         return action
@@ -344,11 +71,11 @@ class DDPG(object):
         for it in range(pdata.UPDATE_ITERATION):
             # Sample replay buffer
             x, y, u, r, d = self.replay_buffer.sample(pdata.BATCH_SIZE)     # 随机获取 batch_size 个五元组样本(sample random minibatch)
-            state = torch.FloatTensor(x).to(device)
-            action = torch.FloatTensor(u).to(device)
-            next_state = torch.FloatTensor(y).to(device)
-            done = torch.FloatTensor(d).to(device)
-            reward = torch.FloatTensor(r).to(device)
+            state = torch.FloatTensor(x).to(self.device)
+            action = torch.FloatTensor(u).to(self.device)
+            next_state = torch.FloatTensor(y).to(self.device)
+            done = torch.FloatTensor(d).to(self.device)
+            reward = torch.FloatTensor(r).to(self.device)
 
             # Compute the target Q value —— Q(S', A') is an value evaluated with next_state and predicted action
             # 这里的 target_Q 是 sample 个 一维tensor
@@ -364,7 +91,7 @@ class DDPG(object):
             # 由论文，critic_loss 其实计算的是每个样本估计值与每个critic网络输出的均值方差
             # torch.nn.functional.mse_loss 为计算tensor中各个元素的的均值方差
             critic_loss = F.mse_loss(current_Q, target_Q) 
-            # self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
+            self.writer.add_scalar('critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
             # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
             # self.logger.add_to_critic_buffer(critic_loss.item())
             critic_loss_list.append(critic_loss.item())
@@ -379,7 +106,7 @@ class DDPG(object):
             # mean()：对tensor对象求所有element的均值
             # backward() 以梯度下降的方式更新参数，则将 actor_loss 设置为反向梯度，这样参数便往梯度上升方向更新
             actor_loss = -self.critic(state, self.actor(state)).mean()  
-            # self.writer.add_scalar('Performance/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
+            self.writer.add_scalar('actor_performance', actor_loss, global_step=self.num_actor_update_iteration)
             # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
             # self.logger.add_to_actor_buffer(actor_loss.item())
             actor_performance_list.append(actor_loss.item())
@@ -408,6 +135,7 @@ class DDPG(object):
     def save(self, mark_str):
         torch.save(self.actor.state_dict(), pdata.DIRECTORY + mark_str + '_actor.pth')
         torch.save(self.critic.state_dict(), pdata.DIRECTORY +  mark_str + '_critic.pth')
+        
 
     def load(self, mark_str):
         file_actor = pdata.DIRECTORY +  mark_str + '_actor.pth'
@@ -417,7 +145,6 @@ class DDPG(object):
             self.critic.load_state_dict(torch.load(file_critic))
         # else:
             # self.logger.write_to_log(".pth doesn't exist. Use default parameters")
-
 
 
 class DDPG_HER(DDPG):
@@ -430,18 +157,19 @@ class DDPG_HER(DDPG):
     def __init__(self, her_state_dim, action_dim, max_action, origin_str, veer_str, logger):
 
         # 存在于 GPU 的神经网络
-        self.actor = ActorHER(her_state_dim, action_dim, max_action).to(device)    # origin_network
-        self.actor_target = ActorHER(her_state_dim, action_dim, max_action).to(device)    # target_network
+        self.actor = ActorHER(her_state_dim, action_dim, max_action).to(self.device)    # origin_network
+        self.actor_target = ActorHER(her_state_dim, action_dim, max_action).to(self.device)    # target_network
         self.actor_target.load_state_dict(self.actor.state_dict())  # initiate actor_target with actor's parameters
 
         self.actor_optimizer = optim.Adam(self.actor.parameters(), pdata.LEARNING_RATE) # 以pdata.LEARNING_RATE指定学习率优化actor中的参数 
 
-        self.critic = CriticHER(her_state_dim, action_dim).to(device)
-        self.critic_target = CriticHER(her_state_dim, action_dim).to(device)
+        self.critic = CriticHER(her_state_dim, action_dim).to(self.device)
+        self.critic_target = CriticHER(her_state_dim, action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), pdata.LEARNING_RATE)
 
         self.replay_buffer = Replay_buffer_HER()    # initiate replay-buffer
+        self.writer = SummaryWriter(pdata.DIRECTORY+'runs')
         self.num_critic_update_iteration = 0
         self.num_actor_update_iteration = 0
         self.num_training = 0
@@ -453,7 +181,7 @@ class DDPG_HER(DDPG):
 
 
     def select_action(self, state):
-        state = torch.FloatTensor(state.reshape(1, -1)).to(device)
+        state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
         # numpy.ndarray.flatten(): 返回一个 ndarray对象的copy，并且将该ndarray压缩成一维数组
         action = self.actor(state).cpu().data.numpy().flatten()
         return action
@@ -468,17 +196,18 @@ class DDPG_HER(DDPG):
         for it in range(pdata.UPDATE_ITERATION):
             # Sample replay buffer
             x, y, u, r, d = self.replay_buffer.sample(pdata.BATCH_SIZE)     # 随机获取 batch_size 个五元组样本(sample random minibatch)
-            state = torch.FloatTensor(x).to(device)
-            action = torch.FloatTensor(u).to(device)
-            next_state = torch.FloatTensor(y).to(device)
-            done = torch.FloatTensor(d).to(device)
-            reward = torch.FloatTensor(r).to(device)
+            state = torch.FloatTensor(x).to(self.device)
+            action = torch.FloatTensor(u).to(self.device)
+            next_state = torch.FloatTensor(y).to(self.device)
+            done = torch.FloatTensor(d).to(self.device)
+            reward = torch.FloatTensor(r).to(self.device)
 
             target_Q = self.critic_target(next_state, self.actor_target(next_state))
             target_Q = reward + ((1 - done) * pdata.GAMMA * target_Q).detach() 
 
             current_Q = self.critic(state, action)
             critic_loss = F.mse_loss(current_Q, target_Q) 
+            self.writer.add_scalar('HER_critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
             # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
             # self.logger.add_to_critic_buffer(critic_loss.item())
             critic_loss_list.append(critic_loss.item())
@@ -489,6 +218,7 @@ class DDPG_HER(DDPG):
             self.critic_optimizer.step()
 
             actor_loss = -self.critic(state, self.actor(state)).mean()  
+            self.writer.add_scalar('HER_actor_performance', actor_loss, global_step=self.num_actor_update_iteration)
             # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
             # self.logger.add_to_actor_buffer(actor_loss.item())
             actor_performance_list.append(actor_loss.item())
@@ -536,20 +266,20 @@ class DDPG_PE(object):
     def __init__(self, state_dim, action_dim, max_velocity, logger):
 
         # 存在于 GPU 的神经网络
-        self.actor = ActorPedestrian(state_dim, action_dim, max_velocity).to(device)    # origin_network
-        self.actor_target = ActorPedestrian(state_dim, action_dim, max_velocity).to(device)    # target_network
+        self.actor = ActorPedestrian(state_dim, action_dim, max_velocity).to(self.device)    # origin_network
+        self.actor_target = ActorPedestrian(state_dim, action_dim, max_velocity).to(self.device)    # target_network
         self.actor_target.load_state_dict(self.actor.state_dict())  # initiate actor_target with actor's parameters
         # pytorch 中的 tensor 默认requires_grad 属性为false，即不参与梯度传播运算，特别地，opimizer中模型参数是会参与梯度优化的
         self.actor_optimizer = optim.Adam(self.actor.parameters(), pdata.LEARNING_RATE) # 以pdata.LEARNING_RATE指定学习率优化actor中的参数 
 
-        self.critic = CriticPedestrian(state_dim, action_dim).to(device)
-        self.critic_target = CriticPedestrian(state_dim, action_dim).to(device)
+        self.critic = CriticPedestrian(state_dim, action_dim).to(self.device)
+        self.critic_target = CriticPedestrian(state_dim, action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), pdata.LEARNING_RATE)
 
         # self.replay_buffer = Replay_buffer()    # initiate replay-buffer
         self.replay_buffer = FilterReplayBuffer()
-        # self.writer = SummaryWriter(pdata.DIRECTORY)
+        self.writer = SummaryWriter(pdata.DIRECTORY+'runs')
         self.num_critic_update_iteration = 0
         self.num_actor_update_iteration = 0
         self.num_training = 0
@@ -558,7 +288,7 @@ class DDPG_PE(object):
 
 
     def select_action(self, state):
-        state = torch.FloatTensor(state.reshape(1, -1)).to(device)
+        state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
         # numpy.ndarray.flatten(): 返回一个 ndarray对象的copy，并且将该ndarray压缩成一维数组
         action = self.actor(state).cpu().data.numpy().flatten()
         return action
@@ -572,11 +302,11 @@ class DDPG_PE(object):
         for it in range(pdata.UPDATE_ITERATION):
             # Sample replay buffer
             x, y, u, r, d = self.replay_buffer.sample(pdata.BATCH_SIZE)     # 随机获取 batch_size 个五元组样本(sample random minibatch)
-            state = torch.FloatTensor(x).to(device)
-            action = torch.FloatTensor(u).to(device)
-            next_state = torch.FloatTensor(y).to(device)
-            done = torch.FloatTensor(d).to(device)
-            reward = torch.FloatTensor(r).to(device)
+            state = torch.FloatTensor(x).to(self.device)
+            action = torch.FloatTensor(u).to(self.device)
+            next_state = torch.FloatTensor(y).to(self.device)
+            done = torch.FloatTensor(d).to(self.device)
+            reward = torch.FloatTensor(r).to(self.device)
 
             # Compute the target Q value —— Q(S', A') is an value evaluated with next_state and predicted action
             # 这里的 target_Q 是 sample 个 一维tensor
@@ -592,7 +322,7 @@ class DDPG_PE(object):
             # 由论文，critic_loss 其实计算的是每个样本估计值与每个critic网络输出的均值方差
             # torch.nn.functional.mse_loss 为计算tensor中各个元素的的均值方差
             critic_loss = F.mse_loss(current_Q, target_Q) 
-            # self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
+            self.writer.add_scalar('PE_critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
             # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
             # self.logger.add_to_critic_buffer(critic_loss.item())
             critic_loss_list.append(critic_loss.item())
@@ -607,7 +337,7 @@ class DDPG_PE(object):
             # mean()：对tensor对象求所有element的均值
             # backward() 以梯度下降的方式更新参数，则将 actor_loss 设置为反向梯度，这样参数便往梯度上升方向更新
             actor_loss = -self.critic(state, self.actor(state)).mean()  
-            # self.writer.add_scalar('Performance/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
+            self.writer.add_scalar('PE_actor_performance', actor_loss, global_step=self.num_actor_update_iteration)
             # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
             # self.logger.add_to_actor_buffer(actor_loss.item())
             actor_performance_list.append(actor_loss.item())
@@ -655,19 +385,19 @@ class DDPG_PE_HER(object):
     def __init__(self, her_state_dim, action_dim, max_velocity, logger):
 
         # 存在于 GPU 的神经网络
-        self.actor = ActorPedestrianHER(her_state_dim, action_dim, max_velocity).to(device)    # origin_network
-        self.actor_target = ActorPedestrianHER(her_state_dim, action_dim, max_velocity).to(device)    # target_network
+        self.actor = ActorPedestrianHER(her_state_dim, action_dim, max_velocity).to(self.device)    # origin_network
+        self.actor_target = ActorPedestrianHER(her_state_dim, action_dim, max_velocity).to(self.device)    # target_network
         self.actor_target.load_state_dict(self.actor.state_dict())  # initiate actor_target with actor's parameters
         # pytorch 中的 tensor 默认requires_grad 属性为false，即不参与梯度传播运算，特别地，opimizer中模型参数是会参与梯度优化的
         self.actor_optimizer = optim.Adam(self.actor.parameters(), pdata.LEARNING_RATE) # 以pdata.LEARNING_RATE指定学习率优化actor中的参数 
 
-        self.critic = CriticPedestrian(her_state_dim, action_dim).to(device)
-        self.critic_target = CriticPedestrian(her_state_dim, action_dim).to(device)
+        self.critic = CriticPedestrian(her_state_dim, action_dim).to(self.device)
+        self.critic_target = CriticPedestrian(her_state_dim, action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), pdata.LEARNING_RATE)
 
         self.replay_buffer = Replay_buffer_HER()    # initiate replay-buffer
-        # self.writer = SummaryWriter(pdata.DIRECTORY)
+        self.writer = SummaryWriter(pdata.DIRECTORY+'runs')
         self.num_critic_update_iteration = 0
         self.num_actor_update_iteration = 0
         self.num_training = 0
@@ -676,7 +406,7 @@ class DDPG_PE_HER(object):
 
 
     def select_action(self, state):
-        state = torch.FloatTensor(state.reshape(1, -1)).to(device)
+        state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
         # numpy.ndarray.flatten(): 返回一个 ndarray对象的copy，并且将该ndarray压缩成一维数组
         action = self.actor(state).cpu().data.numpy().flatten()
         return action
@@ -690,11 +420,11 @@ class DDPG_PE_HER(object):
         for it in range(pdata.UPDATE_ITERATION):
             # Sample replay buffer
             x, y, u, r, d = self.replay_buffer.sample(pdata.BATCH_SIZE)     # 随机获取 batch_size 个五元组样本(sample random minibatch)
-            state = torch.FloatTensor(x).to(device)
-            action = torch.FloatTensor(u).to(device)
-            next_state = torch.FloatTensor(y).to(device)
-            done = torch.FloatTensor(d).to(device)
-            reward = torch.FloatTensor(r).to(device)
+            state = torch.FloatTensor(x).to(self.device)
+            action = torch.FloatTensor(u).to(self.device)
+            next_state = torch.FloatTensor(y).to(self.device)
+            done = torch.FloatTensor(d).to(self.device)
+            reward = torch.FloatTensor(r).to(self.device)
 
             # Compute the target Q value —— Q(S', A') is an value evaluated with next_state and predicted action
             # 这里的 target_Q 是 sample 个 一维tensor
@@ -710,7 +440,7 @@ class DDPG_PE_HER(object):
             # 由论文，critic_loss 其实计算的是每个样本估计值与每个critic网络输出的均值方差
             # torch.nn.functional.mse_loss 为计算tensor中各个元素的的均值方差
             critic_loss = F.mse_loss(current_Q, target_Q) 
-            # self.writer.add_scalar('Loss/critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
+            self.writer.add_scalar('PE_HER_critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
             # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
             # self.logger.add_to_critic_buffer(critic_loss.item())
             critic_loss_list.append(critic_loss.item())
@@ -725,7 +455,7 @@ class DDPG_PE_HER(object):
             # mean()：对tensor对象求所有element的均值
             # backward() 以梯度下降的方式更新参数，则将 actor_loss 设置为反向梯度，这样参数便往梯度上升方向更新
             actor_loss = -self.critic(state, self.actor(state)).mean()  
-            # self.writer.add_scalar('Performance/actor_loss', actor_loss, global_step=self.num_actor_update_iteration)
+            self.writer.add_scalar('PE_HER_actor_performance', actor_loss, global_step=self.num_actor_update_iteration)
             # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
             # self.logger.add_to_actor_buffer(actor_loss.item())
             actor_performance_list.append(actor_loss.item())
@@ -763,3 +493,241 @@ class DDPG_PE_HER(object):
             self.critic.load_state_dict(torch.load(file_critic))
         # else:
         #     self.logger.write_to_log(".pth doesn't exist. Use default parameters")
+
+
+class MADDPG(object):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    def __init__(self, state_dim, action_dim, max_action, agent_n, logger):
+         # 存在于 GPU 的神经网络
+        self.actor = Actor(state_dim, action_dim, max_action).to(self.device)    # origin_network
+        self.actor_target = Actor(state_dim, action_dim, max_action).to(self.device)    # target_network
+        self.actor_target.load_state_dict(self.actor.state_dict())  # initiate actor_target with actor's parameters
+        # pytorch 中的 tensor 默认requires_grad 属性为false，即不参与梯度传播运算，特别地，opimizer中模型参数是会参与梯度优化的
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), pdata.LEARNING_RATE) # 以pdata.LEARNING_RATE指定学习率优化actor中的参数 
+
+        self.critic = CriticCentral(agent_n).to(self.device)
+        self.critic_target = CriticCentral(agent_n).to(self.device)
+        self.critic_target.load_state_dict(self.critic.state_dict())
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), pdata.LEARNING_RATE)
+        # self.replay_buffer 取消：每个Agent不再有独立的经验池
+        self.writer = SummaryWriter(pdata.DIRECTORY+'runs')
+        self.num_critic_update_iteration = 0
+        self.num_actor_update_iteration = 0
+        self.num_training = 0
+
+        self.logger = logger
+
+
+    def select_action(self, state):
+        state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
+        # numpy.ndarray.flatten(): 返回一个 ndarray对象的copy，并且将该ndarray压缩成一维数组
+        action = self.actor(state).cpu().data.numpy().flatten()
+        return action       # 未归一化的
+
+    def select_target_actions(self, states):
+        # state 的输入必须是归一化的[[],[]] np.ndarray
+        united_state = torch.FloatTensor(states).to(self.device)
+        action = self.actor_target(united_state).cpu().data.numpy()
+        return action   # 未归一化的
+
+    def select_current_actions(self, states):
+        united_state = torch.FloatTensor(states).to(self.device)
+        action = self.actor(united_state).cpu().data.numpy()
+        return action   # 未归一化的
+
+
+    # update the parameters in actor network and critic network
+    def update(self, central_replay_buffer_ma, agent_list):
+        critic_loss_list = []
+        actor_performance_list = []
+        # Sample replay buffer:  [(united_normalized_states, united_normalized_next_states, united__normalized_action, [reward_1, ...], done), (...)]
+        x, y, u, r, d = central_replay_buffer_ma.sample(pdata.BATCH_SIZE)     # 随机获取 batch_size 个五元组样本(sample random minibatch)
+        # TODO: 从这里以下要改造成MADDPG的范式 
+        next_actions = [agent_list[i].select_target_actions(y[:,i*pdata.STATE_DIMENSION : i*pdata.STATE_DIMENSION + pdata.STATE_DIMENSION]) 
+                        for i in range(len(agent_list))]
+        next_actions = np.concatenate(next_actions, axis=1)
+
+        united_next_action_batch = torch.FloatTensor(next_actions).to(self.device)
+        united_state_batch = torch.FloatTensor(x).to(self.device)   
+        united_action_batch = torch.FloatTensor(u).to(self.device)  
+        united_next_state_batch = torch.FloatTensor(y).to(self.device)  
+        done = torch.FloatTensor(d).to(self.device) 
+        r = r[:, np.newaxis]
+        reward_batch = torch.FloatTensor(r).to(self.device)  
+
+        target_Q = self.critic_target(united_next_state_batch, united_next_action_batch)    # shape= (64,1)
+        target_Q = reward_batch + ((1 - done) * pdata.GAMMA * target_Q).detach()  # batch_size个维度
+        current_Q = self.critic(united_state_batch, united_action_batch) 
+
+        critic_loss = F.mse_loss(current_Q, target_Q) 
+        self.writer.add_scalar('critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
+        # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
+        # self.logger.add_to_critic_buffer(critic_loss.item())
+        critic_loss_list.append(critic_loss.item())
+        self.critic_optimizer.zero_grad()   # zeros the gradient buffer
+        critic_loss.backward()              # back propagation on a dynamic graph
+        self.critic_optimizer.step()
+
+        current_actions = [agent_list[i].select_current_actions(x[:,i*pdata.STATE_DIMENSION : i*pdata.STATE_DIMENSION + pdata.STATE_DIMENSION])
+                             for i in range(len(agent_list))]
+        current_actions_batch = torch.FloatTensor(np.concatenate(current_actions, axis=1)).to(self.device)
+        actor_loss = -self.critic(united_state_batch, current_actions_batch).mean()  
+        self.writer.add_scalar('actor_performance', actor_loss, global_step=self.num_actor_update_iteration)
+        # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
+        # self.logger.add_to_actor_buffer(actor_loss.item())
+        actor_performance_list.append(actor_loss.item())
+
+        # Optimize the actor
+        self.actor_optimizer.zero_grad()    # Clears the gradients of all optimized torch.Tensor
+        actor_loss.backward()
+        self.actor_optimizer.step()     # perform a single optimization step
+
+        # 这里是两个 target网络的 soft update
+        for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
+            target_param.data.copy_(pdata.TAU * param.data + (1 - pdata.TAU) * target_param.data)
+
+        for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
+            target_param.data.copy_(pdata.TAU * param.data + (1 - pdata.TAU) * target_param.data)
+
+        self.num_actor_update_iteration += 1
+        self.num_critic_update_iteration += 1         
+
+        actor_performance = np.mean(np.array(actor_performance_list)).item()
+        self.logger.add_to_actor_buffer(actor_performance)
+        critic_loss = np.mean(critic_loss_list).item()
+        self.logger.add_to_critic_buffer(critic_loss)
+
+
+    def save(self, mark_str):
+        torch.save(self.actor.state_dict(), pdata.DIRECTORY + mark_str + '_actor_ma.pth')
+        torch.save(self.critic.state_dict(), pdata.DIRECTORY +  mark_str + '_critic_ma.pth')
+        
+
+    def load(self, mark_str):
+        file_actor = pdata.DIRECTORY +  mark_str + '_actor_ma.pth'
+        file_critic = pdata.DIRECTORY +  mark_str + '_critic_ma.pth'
+        if os.path.exists(file_actor) and os.path.exists(file_critic):
+            self.actor.load_state_dict(torch.load(file_actor))
+            self.critic.load_state_dict(torch.load(file_critic))
+        # else:
+            # self.logger.write_to_log(".pth doesn't exist. Use default parameters")
+
+
+class MADDPG_PE(object):
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    def __init__(self, state_dim, action_dim, max_velocity, agent_n, logger):
+         # 存在于 GPU 的神经网络
+        self.actor = ActorPedestrian(state_dim, action_dim, max_velocity).to(self.device)    # origin_network
+        self.actor_target = ActorPedestrian(state_dim, action_dim, max_velocity).to(self.device)    # target_network
+        self.actor_target.load_state_dict(self.actor.state_dict())  # initiate actor_target with actor's parameters
+        # pytorch 中的 tensor 默认requires_grad 属性为false，即不参与梯度传播运算，特别地，opimizer中模型参数是会参与梯度优化的
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), pdata.LEARNING_RATE) # 以pdata.LEARNING_RATE指定学习率优化actor中的参数 
+
+        self.critic = CriticCentralPE(agent_n).to(self.device)
+        self.critic_target = CriticCentralPE(agent_n).to(self.device)
+        self.critic_target.load_state_dict(self.critic.state_dict())
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), pdata.LEARNING_RATE)
+        # self.replay_buffer 取消：每个Agent不再有独立的经验池
+        self.writer = SummaryWriter(pdata.DIRECTORY+'runs')
+        self.num_critic_update_iteration = 0
+        self.num_actor_update_iteration = 0
+        self.num_training = 0
+
+        self.logger = logger
+
+
+    def select_action(self, state):
+        state = torch.FloatTensor(state.reshape(1, -1)).to(self.device)
+        # numpy.ndarray.flatten(): 返回一个 ndarray对象的copy，并且将该ndarray压缩成一维数组
+        action = self.actor(state).cpu().data.numpy().flatten()
+        return action       # 未归一化的
+
+    def select_target_actions(self, states):
+        # state 的输入必须是归一化的[[],[]] np.ndarray
+        united_state = torch.FloatTensor(states).to(self.device)
+        action = self.actor_target(united_state).cpu().data.numpy()
+        return action   # 未归一化的
+
+    def select_current_actions(self, states):
+        united_state = torch.FloatTensor(states).to(self.device)
+        action = self.actor(united_state).cpu().data.numpy()
+        return action   # 未归一化的
+
+
+    # update the parameters in actor network and critic network
+    def update(self, central_replay_buffer_ma, agent_list):
+        critic_loss_list = []
+        actor_performance_list = []
+        # Sample replay buffer:  [(united_normalized_states, united_normalized_next_states, united__normalized_action, [reward_1, ...], done), (...)]
+        x, y, u, r, d = central_replay_buffer_ma.sample(pdata.BATCH_SIZE)     # 随机获取 batch_size 个五元组样本(sample random minibatch)
+
+        next_actions = [agent_list[i].select_target_actions(y[:,i*pdata.STATE_DIMENSION : i*pdata.STATE_DIMENSION + pdata.STATE_DIMENSION])
+                         for i in range(len(agent_list))]    
+        next_actions = np.concatenate(next_actions, axis=1)
+        
+        united_next_action_batch = torch.FloatTensor(next_actions).to(self.device)
+        united_state_batch = torch.FloatTensor(x).to(self.device)    
+        united_action_batch = torch.FloatTensor(u).to(self.device)   
+        united_next_state_batch = torch.FloatTensor(y).to(self.device)   
+        done = torch.FloatTensor(d).to(self.device) 
+        r = r[:, np.newaxis]
+        reward_batch = torch.FloatTensor(r).to(self.device)   
+
+        target_Q = self.critic_target(united_next_state_batch, united_next_action_batch)
+        target_Q = reward_batch + ((1 - done) * pdata.GAMMA * target_Q).detach()  # batch_size个维度
+        current_Q = self.critic(united_state_batch, united_action_batch) 
+
+        critic_loss = F.mse_loss(current_Q, target_Q) 
+        self.writer.add_scalar('critic_loss', critic_loss, global_step=self.num_critic_update_iteration)
+        # self.logger.write_to_log('critic_loss:{loss}'.format(loss=critic_loss))
+        # self.logger.add_to_critic_buffer(critic_loss.item())
+        critic_loss_list.append(critic_loss.item())
+        self.critic_optimizer.zero_grad()   # zeros the gradient buffer
+        critic_loss.backward()              # back propagation on a dynamic graph
+        self.critic_optimizer.step()
+
+        current_actions = [agent_list[i].select_current_actions(x[:,i*pdata.STATE_DIMENSION : i*pdata.STATE_DIMENSION + pdata.STATE_DIMENSION])
+                             for i in range(len(agent_list))]
+        current_actions_batch = torch.FloatTensor(np.concatenate(current_actions, axis=1)).to(self.device)
+        actor_loss = -self.critic(united_state_batch, current_actions_batch).mean()  
+        self.writer.add_scalar('actor_performance', actor_loss, global_step=self.num_actor_update_iteration)
+        # self.logger.write_to_log('actor_loss:{loss}'.format(loss=actor_loss))
+        # self.logger.add_to_actor_buffer(actor_loss.item())
+        actor_performance_list.append(actor_loss.item())
+
+        # Optimize the actor
+        self.actor_optimizer.zero_grad()    # Clears the gradients of all optimized torch.Tensor
+        actor_loss.backward()
+        self.actor_optimizer.step()     # perform a single optimization step
+
+        # 这里是两个 target网络的 soft update
+        for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
+            target_param.data.copy_(pdata.TAU * param.data + (1 - pdata.TAU) * target_param.data)
+
+        for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
+            target_param.data.copy_(pdata.TAU * param.data + (1 - pdata.TAU) * target_param.data)
+
+        self.num_actor_update_iteration += 1
+        self.num_critic_update_iteration += 1         
+
+        actor_performance = np.mean(np.array(actor_performance_list)).item()
+        self.logger.add_to_actor_buffer(actor_performance)
+        critic_loss = np.mean(critic_loss_list).item()
+        self.logger.add_to_critic_buffer(critic_loss)
+
+
+    def save(self, mark_str):
+        torch.save(self.actor.state_dict(), pdata.DIRECTORY + mark_str + '_actor_ma_pe.pth')
+        torch.save(self.critic.state_dict(), pdata.DIRECTORY +  mark_str + '_critic_ma_pe.pth')
+        
+
+    def load(self, mark_str):
+        file_actor = pdata.DIRECTORY +  mark_str + '_actor_ma_pe.pth'
+        file_critic = pdata.DIRECTORY +  mark_str + '_critic_ma_pe.pth'
+        if os.path.exists(file_actor) and os.path.exists(file_critic):
+            self.actor.load_state_dict(torch.load(file_actor))
+            self.critic.load_state_dict(torch.load(file_critic))
+        # else:
+            # self.logger.write_to_log(".pth doesn't exist. Use default parameters")
