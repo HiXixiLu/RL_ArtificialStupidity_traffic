@@ -8,6 +8,7 @@ import torch as th
 
 if __name__=='__main__':
     a = np.array([1,2,3])
-    a = a[:, np.newaxis]
-    b = np.array([[1],[2],[3]])
-    print(a+b)
+    b = th.FloatTensor(a)
+    print(b.shape)
+    b = b[:, None]
+    print(b, b.shape)

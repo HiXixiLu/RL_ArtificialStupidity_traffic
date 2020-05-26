@@ -538,7 +538,7 @@ class MADDPG(object):
 
 
     # update the parameters in actor network and critic network
-    def update(self, central_replay_buffer_ma, agent_list):
+    def update(self, central_replay_buffer_ma, agent_list, agent_idx):
         critic_loss_list = []
         actor_performance_list = []
         # Sample replay buffer:  [(united_normalized_states, united_normalized_next_states, united__normalized_action, [reward_1, ...], done), (...)]
@@ -553,10 +553,9 @@ class MADDPG(object):
         united_action_batch = torch.FloatTensor(u).to(self.device)  
         united_next_state_batch = torch.FloatTensor(y).to(self.device)  
         done = torch.FloatTensor(d).to(self.device) 
-        r = r[:, np.newaxis]
-        reward_batch = torch.FloatTensor(r).to(self.device)  
-
-        target_Q = self.critic_target(united_next_state_batch, united_next_action_batch)    # shape= (64,1)
+        reward_batch = torch.FloatTensor(r[:,agent_idx])  # torch.Size([64])
+        reward_batch = reward_batch[:, None].to(self.device)    # torch.Size([64,1])
+        target_Q = self.critic_target(united_next_state_batch, united_next_action_batch)    # torch.Size([64,1])
         target_Q = reward_batch + ((1 - done) * pdata.GAMMA * target_Q).detach()  # batch_size个维度
         current_Q = self.critic(united_state_batch, united_action_batch) 
 
@@ -657,7 +656,7 @@ class MADDPG_PE(object):
 
 
     # update the parameters in actor network and critic network
-    def update(self, central_replay_buffer_ma, agent_list):
+    def update(self, central_replay_buffer_ma, agent_list, agent_idx):
         critic_loss_list = []
         actor_performance_list = []
         # Sample replay buffer:  [(united_normalized_states, united_normalized_next_states, united__normalized_action, [reward_1, ...], done), (...)]
@@ -672,9 +671,8 @@ class MADDPG_PE(object):
         united_action_batch = torch.FloatTensor(u).to(self.device)   
         united_next_state_batch = torch.FloatTensor(y).to(self.device)   
         done = torch.FloatTensor(d).to(self.device) 
-        r = r[:, np.newaxis]
-        reward_batch = torch.FloatTensor(r).to(self.device)   
-
+        reward_batch = torch.FloatTensor(r[:,agent_idx])  # torch.Size([64])
+        reward_batch = reward_batch[:, None].to(self.device)    # torch.Size([64,1])   
         target_Q = self.critic_target(united_next_state_batch, united_next_action_batch)
         target_Q = reward_batch + ((1 - done) * pdata.GAMMA * target_Q).detach()  # batch_size个维度
         current_Q = self.critic(united_state_batch, united_action_batch) 

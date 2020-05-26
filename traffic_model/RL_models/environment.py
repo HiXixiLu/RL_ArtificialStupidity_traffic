@@ -1078,13 +1078,13 @@ class EnvironmentMA():
 
     # TODO：需要修改协作任务达成的判定
     def get_united_reward(self):
-        united_reward = 0
+        united_reward = []
         for ag in self.agent_queue:
             if isinstance(ag, vehicle):
                 reward = self._get_reward(ag)
             elif isinstance(ag, pedestrian):
                 reward = self._get_reward_pe(ag)
-            united_reward = united_reward + reward
+            united_reward.append(reward)
         return united_reward
 
 

@@ -286,7 +286,10 @@ class PedestrianMA(pedestrian):
         super().__init__(logger)
 
     def update_model(self, central_replay_buffer, agent_list):
-        self.model.update(central_replay_buffer, agent_list)
+        for idx in range(len(agent_list)):
+            if agent_list[idx] == self:
+                self.model.update(central_replay_buffer, agent_list, idx)
+                break
 
     def select_target_actions(self, states):
         # state 的输入必须是归一化的[[],[]] np.ndarray
