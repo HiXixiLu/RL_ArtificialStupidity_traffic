@@ -7,8 +7,7 @@ import torch as th
 
 
 if __name__=='__main__':
-    a = np.array([1,2,3])
-    b = th.FloatTensor(a)
-    print(b.shape)
-    b = b[:, None]
-    print(b, b.shape)
+    a = np.array([[1,2],[3,4]])
+    b = a.flatten()
+    print(a)
+    print(b)

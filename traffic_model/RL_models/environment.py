@@ -1032,7 +1032,14 @@ class EnvironmentMA():
         self._update_environment(action_list)
         next_united_state = self.get_united_state_feature()
         rewards = self.get_united_reward()
-        done = False    # TODO: 这里done的判定还需要写
+        mark = 0
+        for i in range(len(self.agent_queue)):
+            ag = self.agent_queue[i]
+            mark = (mark + 1) if ag.arrived else mark
+            if rewards[i] == -pdata.MAIN_REWARD:
+                mark = -1
+                break
+        done = True if (mark == -1 or mark == 3) else False
         return next_united_state, rewards, done
 
     def update_policy(self, central_replay_buffer):
@@ -1076,14 +1083,18 @@ class EnvironmentMA():
             agent.update_attr(act)
 
 
-    # TODO：需要修改协作任务达成的判定
     def get_united_reward(self):
         united_reward = []
         for ag in self.agent_queue:
+            if ag.arrived == True:
+                united_reward.append(pdata.MAIN_REWARD)
+                continue
             if isinstance(ag, vehicle):
                 reward = self._get_reward(ag)
             elif isinstance(ag, pedestrian):
                 reward = self._get_reward_pe(ag)
+            if reward == pdata.MAIN_REWARD:
+                    ag.arrived = True
             united_reward.append(reward)
         return united_reward
 

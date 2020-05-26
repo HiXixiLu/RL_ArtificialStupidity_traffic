@@ -61,7 +61,10 @@ class motor_train_process_HER(threading.Thread):
                     action = self.agent.select_action(state_her)    
 
                     # issue 3 add noise to action 
-                    noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_SD)])
+                    if isinstance(agent, motorVehicle):
+                        noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_SD)])
+                    elif isinstance(agent, Bicycle):
+                        noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_NON_SD)])
                     action = action + noise
                     if(abs(action[0]) > pdata.MAX_MOTOR_ACTION[0]):
                         action[0] = pdata.MAX_MOTOR_ACTION[0] if action[0] > pdata.MAX_MOTOR_ACTION[0] else -pdata.MAX_MOTOR_ACTION[0]
@@ -134,7 +137,10 @@ class motor_train_process(threading.Thread):
                     action = self.agent.select_action(state)
 
                     # add noise to action 
-                    noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_SD)])
+                    if isinstance(agent, motorVehicle):
+                        noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_SD)])
+                    elif isinstance(agent, Bicycle):
+                        noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_NON_SD)])
                     action = action + noise
                     if(abs(action[0]) > pdata.MAX_MOTOR_ACTION[0]):
                         action[0] = pdata.MAX_MOTOR_ACTION[0] if action[0] > pdata.MAX_MOTOR_ACTION[0] else -pdata.MAX_MOTOR_ACTION[0]
@@ -208,7 +214,10 @@ class motor_train_filter_process(threading.Thread):
                     action = self.agent.select_action(state)
 
                     # add noise to action 
-                    noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_SD)])
+                    if isinstance(agent, motorVehicle):
+                        noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_SD)])
+                    elif isinstance(agent, Bicycle):
+                        noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_NON_SD)])
                     action = action + noise
                     if(abs(action[0]) > pdata.MAX_MOTOR_ACTION[0]):
                         action[0] = pdata.MAX_MOTOR_ACTION[0] if action[0] > pdata.MAX_MOTOR_ACTION[0] else -pdata.MAX_MOTOR_ACTION[0]

@@ -457,8 +457,11 @@ class motorVehicle(vehicle):
 class MotorVehicleMA(motorVehicle):
     def __init__(self, logger):
         super().__init__(logger)
+        self.arrived = False
 
     def update_model(self, central_replay_buffer, agent_list):
+        if self.arrived:
+            return
         for idx in range(len(agent_list)):
             if agent_list[idx] == self:
                 self.model.update(central_replay_buffer, agent_list, idx)
@@ -554,8 +557,11 @@ class Bicycle(vehicle):
 class BicycleMA(Bicycle):
     def __init__(self, logger):
         super().__init__(logger)
+        self.arrived = False
 
     def update_model(self, central_replay_buffer, agent_list):
+        if self.arrived:
+            return
         for idx in range(len(agent_list)):
             if agent_list[idx] == self:
                 self.model.update(central_replay_buffer, agent_list, idx)

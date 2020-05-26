@@ -45,9 +45,23 @@ if __name__ == '__main__':
 
     for i in range(pdata.MAX_EPISODE):
         united_state = united_next_state
-        actions = [ma_env.agent_queue[j].select_action(united_state[j*pdata.STATE_DIMENSION : j*pdata.STATE_DIMENSION + pdata.STATE_DIMENSION])
-                    for j in range(len(ma_env.agent_queue))]
 
+        actions = []
+        for j in range(len(ma_env.agent_queue)):
+            ag = ma_env.agent_queue[j]
+            if not ag.arrived:
+                act = ag.select_action(united_state[j*pdata.STATE_DIMENSION : j*pdata.STATE_DIMENSION + pdata.STATE_DIMENSION])
+                if isinstance(ag, MotorVehicleMA):
+                    noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_SD)])
+                elif isinstance(ag, BicycleMA):
+                    noise = np.array([np.random.normal(0, pdata.ANGLE_SD), np.random.normal(0, pdata.NORM_NON_SD)])
+                else:
+                    noise = np.random.normal(0, pdata.HUMAN_SD, size=2)
+                act = act + noise
+            else:
+                act = np.zeros(2)
+            actions.append(act)
+            
         united_next_state, reward, done = ma_env.step(actions)
 
         for k in range(len(ma_env.agent_queue)):
